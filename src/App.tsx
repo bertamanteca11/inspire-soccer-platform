@@ -55,7 +55,7 @@ export default function App() {
 }
 
 function Platform({ role }: { role: Role }) {
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTab] = useState<Tab>(role === 'coach' ? 'attendance' : 'home');
   const [nextSession, setNextSession] = useState<AppSession | null>(null);
   const [selectedSession, setSelectedSession] = useState<AppSession | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -125,6 +125,12 @@ function Platform({ role }: { role: Role }) {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+  if (role === 'coach' && !['attendance', 'evaluation'].includes(tab)) {
+    setTab('attendance');
+  }
+  }, [role, tab]);
 
   const headerTitle = getHeaderTitle(tab);
   const headerSubtitle = tab === 'home'
