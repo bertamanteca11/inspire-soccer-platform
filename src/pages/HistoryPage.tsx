@@ -1,0 +1,12 @@
+import { useEffect, useState } from 'react';
+import { supabase } from '../supabase';
+import { Card, PageTitle } from '../components/ui';
+import { formatDate } from '../utils/formatters';
+
+export function HistoryPage() {
+  const [sessions, setSessions] = useState<any[]>([]); const [selectedSessionId, setSelectedSessionId] = useState(''); const [evaluations, setEvaluations] = useState<any[]>([]); const [attendance, setAttendance] = useState<any[]>([]); const [injuries, setInjuries] = useState<any[]>([]);
+  async function loadSessions() { const { data } = await supabase.from('sessions').select('*').order('session_date', { ascending: false }); setSessions(data || []); setSelectedSessionId((data || [])[0]?.id || ''); }
+  async function loadHistory(sessionId: string) { if (!sessionId) return; const ev = await supabase.from('evaluations').select('*, players(display_name)').eq('session_id', sessionId); const att = await supabase.from('attendance').select('*, players(display_name)').eq('session_id', sessionId); const inj = await supabase.from('injuries').select('*, players(display_name)').eq('session_id', sessionId); setEvaluations(ev.data || []); setAttendance(att.data || []); setInjuries(inj.data || []); }
+  useEffect(() => { loadSessions(); }, []); useEffect(() => { if (selectedSessionId) loadHistory(selectedSessionId); }, [selectedSessionId]); const top = [...evaluations].filter(e => e.total_score).sort((a,b) => Number(b.total_score)-Number(a.total_score))[0];
+  return <div className="stack"><PageTitle title="Histórico admin" subtitle="Revisa datos anteriores de forma compacta." /><select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>{sessions.map(s => <option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)}</option>)}</select><div className="history-grid"><Card><p className="kicker">Evaluaciones</p><h2>{evaluations.length}</h2></Card><Card><p className="kicker">Asistencias</p><h2>{attendance.length}</h2></Card><Card><p className="kicker">Lesiones</p><h2>{injuries.length}</h2></Card></div><Card><p className="kicker">Top sesión</p>{top ? <p>{top.players?.display_name || 'Jugador'} · {top.total_score}</p> : <p>No hay evaluaciones todavía.</p>}</Card><Card><p className="kicker">Detalle rápido</p>{evaluations.slice(0,8).map(e => <p key={e.id}>{e.players?.display_name || 'Jugador'} — {e.total_score}</p>)}</Card></div>;
+}

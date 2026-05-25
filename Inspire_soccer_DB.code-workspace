@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "inspire-soccer-platform",
+			"path": "."
+		},
+		{
+			"name": "public",
+			"path": "../v10/public"
+		}
+	],
+	"settings": {}
+}
