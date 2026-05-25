@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, RotateCcw, Save } from 'lucide-react';
+import { CheckCircle2, RotateCcw, Save, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
@@ -9,6 +9,7 @@ import { Card, PageTitle } from '../components/ui';
 export function CallupPage({ role, session, reload, setError }: { role: Role; session: AppSession; reload: any; setError: any }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [callups, setCallups] = useState<any[]>([]);
+  const [suspensions, setSuspensions] = useState<any[]>([]);
   const [localLocked, setLocalLocked] = useState(!!session.callup_confirmed);
   const [loading, setLoading] = useState(true);
 
@@ -18,121 +19,74 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
   async function loadCallups() {
     setLoading(true);
 
+    await supabase.rpc('create_yellow_accumulation_suspensions');
+
     const playersRes = await supabase
       .from('players')
       .select('*')
       .in('status', ['active', 'trial', 'guest'])
       .order('shirt_number', { ascending: true, nullsFirst: false });
 
-    const allPlayers = playersRes.data || [];
+    const activeSusp = await supabase.from('active_suspensions').select('*');
+    const activeSuspensions = activeSusp.data || [];
+    setSuspensions(activeSuspensions);
+
+    const suspendedIds = new Set(activeSuspensions.map((s: any) => s.player_id));
+    const allPlayers = (playersRes.data || []).filter((p: any) => !suspendedIds.has(p.id));
 
     const callupsRes = await supabase
       .from('callups')
       .select('*')
       .eq('session_id', session.id);
 
-    let existingCallups = callupsRes.data || [];
+    let existingCallups = (callupsRes.data || []).filter((c: any) =>
+      allPlayers.some((p: any) => p.id === c.player_id)
+    );
 
-    // Si la sesión todavía no tiene convocatoria, creamos por defecto
-    // todos los jugadores activos/prueba/invitados como convocados.
-    // Así el coach solo tiene que quitar los NO convocados.
-      if (existingCallups.length === 0 && allPlayers.length > 0) {
-
-    const rows = allPlayers.map((player: any) => ({
-
-      session_id: session.id,
-
-      player_id: player.id,
-
-      status:
-
-        player.status === 'trial'
-
+    if (!session.callup_confirmed && existingCallups.length === 0 && allPlayers.length > 0) {
+      const rows = allPlayers.map((player: any) => ({
+        session_id: session.id,
+        player_id: player.id,
+        status: player.status === 'trial'
           ? 'trial'
-
           : player.status === 'guest'
-
             ? 'guest_not_evaluable'
-
             : 'called_up',
+        evaluable: player.status !== 'guest',
+      }));
 
-      evaluable: player.status !== 'guest',
+      const { error } = await supabase
+        .from('callups')
+        .upsert(rows, { onConflict: 'session_id,player_id' });
 
-    }));
+      if (error) setError(error.message);
 
-    const { error } = await supabase
-
-      .from('callups')
-
-      .upsert(rows, { onConflict: 'session_id,player_id' });
-
-    if (error) {
-
-      setError(error.message);
-
+      const refreshed = await supabase.from('callups').select('*').eq('session_id', session.id);
+      existingCallups = (refreshed.data || []).filter((c: any) =>
+        allPlayers.some((p: any) => p.id === c.player_id)
+      );
     }
 
-    const refreshed = await supabase
-
-      .from('callups')
-
-      .select('*')
-
-      .eq('session_id', session.id);
-
-    existingCallups = refreshed.data || [];
-
+    setPlayers(allPlayers);
+    setCallups(existingCallups);
+    setLoading(false);
   }
-
-  setPlayers(allPlayers);
-
-  setCallups(existingCallups);
-
-  setLoading(false);
-
-}
 
   useEffect(() => {
     setLocalLocked(!!session.callup_confirmed);
     loadCallups();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.callup_confirmed]);
 
   async function confirmConvocatoria() {
     const confirmed = window.confirm('¿Confirmar convocatoria? Después de confirmar, el coach no podrá modificarla.');
     if (!confirmed) return;
 
-    // Aseguramos asistencia/evaluación para todos los convocados.
-    for (const callup of callups) {
-      await supabase.from('attendance').upsert(
-        {
-          session_id: session.id,
-          player_id: callup.player_id,
-          status: 'present',
-        },
-        { onConflict: 'session_id,player_id' }
-      );
-
-      if (callup.evaluable) {
-        await supabase.from('evaluations').upsert(
-          {
-            session_id: session.id,
-            player_id: callup.player_id,
-          },
-          { onConflict: 'session_id,player_id' }
-        );
-      }
-    }
-
     const { error } = await supabase
       .from('sessions')
       .update({ callup_confirmed: true, callup_confirmed_at: new Date().toISOString() })
       .eq('id', session.id);
 
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    if (error) { setError(error.message); return; }
 
     setLocalLocked(true);
     await loadCallups();
@@ -141,7 +95,6 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
 
   async function reopenConvocatoria() {
     if (!isAdmin) return;
-
     const confirmed = window.confirm('¿Reabrir convocatoria? Esto permitirá hacer cambios otra vez.');
     if (!confirmed) return;
 
@@ -150,10 +103,7 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
       .update({ callup_confirmed: false, callup_confirmed_at: null })
       .eq('id', session.id);
 
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    if (error) { setError(error.message); return; }
 
     setLocalLocked(false);
     await loadCallups();
@@ -168,10 +118,7 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
 
     if (existing) {
       const { error } = await supabase.from('callups').delete().eq('id', existing.id);
-      if (error) {
-        setError(error.message);
-        return;
-      }
+      if (error) { setError(error.message); return; }
 
       await supabase.from('attendance').delete().eq('session_id', session.id).eq('player_id', player.id);
       await supabase.from('evaluations').delete().eq('session_id', session.id).eq('player_id', player.id);
@@ -186,10 +133,7 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
         evaluable,
       });
 
-      if (error) {
-        setError(error.message);
-        return;
-      }
+      if (error) { setError(error.message); return; }
     }
 
     await loadCallups();
@@ -207,7 +151,19 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
 
   return (
     <div className="stack">
-      <PageTitle title={`Convocatoria: ${session.name}`} subtitle="Todos aparecen convocados por defecto. Quita solo los no convocados." />
+      <PageTitle title={`Convocatoria: ${session.name}`} subtitle="Todos aparecen convocados por defecto. Los sancionados y lesionados no aparecen." />
+
+      {suspensions.length > 0 && (
+        <Card className="warning">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>Jugadores sancionados no disponibles</strong>
+            {suspensions.map((s: any) => (
+              <p key={s.id}>{s.display_name}: {s.matches_remaining} partido(s)</p>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
         <p className="kicker">Estado</p>

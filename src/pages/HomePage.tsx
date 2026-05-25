@@ -1,4 +1,4 @@
-import { AlertTriangle, Trophy } from 'lucide-react';
+import { AlertTriangle, Trophy, Ban, ClipboardList } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
@@ -9,7 +9,23 @@ import { Action, Card } from '../components/ui';
 
 const LOGO_URL = '/assets/logo.png';
 
-export function HomePage({ role, nextSession, selectedSession, players, attendance, evaluations, cardTotals, setTab }: {
+type TopPlayer = {
+  id: string;
+  name: string;
+  average: number;
+  count: number;
+};
+
+export function HomePage({
+  role,
+  nextSession,
+  selectedSession,
+  players,
+  attendance,
+  evaluations,
+  cardTotals,
+  setTab,
+}: {
   role: Role;
   nextSession: AppSession | null;
   selectedSession: AppSession | null;
@@ -19,52 +35,50 @@ export function HomePage({ role, nextSession, selectedSession, players, attendan
   cardTotals: PlayerCardTotal[];
   setTab: (tab: Tab) => void;
 }) {
-  const [globalTop, setGlobalTop] = useState<any[]>([]);
+  const [topMode, setTopMode] = useState<'matches' | 'trainings'>('matches');
+  const [topMatches, setTopMatches] = useState<TopPlayer[]>([]);
+  const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
+  const [suspensions, setSuspensions] = useState<any[]>([]);
 
   const evaluatedCount = evaluations.filter((e: Evaluation) => e.evaluated).length;
-  const sessionTopPlayers = [...evaluations]
-    .filter((e: Evaluation) => e.total_score)
-    .sort((a, b) => Number(b.total_score) - Number(a.total_score))
-    .slice(0, 3);
-
-  useEffect(() => {
-    loadGlobalTop();
-  }, []);
-
-  async function loadGlobalTop() {
-    const { data } = await supabase
-      .from('evaluations')
-      .select('player_id,total_score,players(display_name)')
-      .not('total_score', 'is', null);
-
-    const grouped: Record<string, { name: string; scores: number[] }> = {};
-
-    (data || []).forEach((row: any) => {
-      if (!grouped[row.player_id]) {
-        grouped[row.player_id] = {
-          name: row.players?.display_name || 'Jugador',
-          scores: [],
-        };
-      }
-
-      grouped[row.player_id].scores.push(Number(row.total_score));
-    });
-
-    const ranking = Object.entries(grouped)
-      .map(([id, item]) => ({
-        id,
-        name: item.name,
-        average: item.scores.reduce((a, b) => a + b, 0) / item.scores.length,
-      }))
-      .sort((a, b) => b.average - a.average)
-      .slice(0, 3);
-
-    setGlobalTop(ranking);
-  }
-
-  const cardWarnings = getCardWarnings(cardTotals).slice(0, 5);
+  const cardWarnings = getCardWarnings(cardTotals).slice(0, 8);
   const sessionIsToday = nextSession?.session_date === new Date().toISOString().slice(0, 10);
   const evaluationDone = !!selectedSession?.evaluation_confirmed || (players.length > 0 && evaluatedCount >= players.length);
+
+  useEffect(() => {
+    loadGlobalTops();
+    loadSuspensions();
+  }, []);
+
+  async function loadGlobalTops() {
+    const { data } = await supabase
+      .from('evaluations')
+      .select('player_id,total_score,sessions(type),players(display_name)')
+      .eq('evaluated', true)
+      .not('total_score', 'is', null);
+
+    const rows = data || [];
+    const matchRows = rows.filter((r: any) =>
+      ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(r.sessions?.type)
+    );
+    const trainingRows = rows.filter((r: any) => r.sessions?.type === 'training');
+
+    setTopMatches(buildTopRanking(matchRows));
+    setTopTrainings(buildTopRanking(trainingRows));
+  }
+
+  async function loadSuspensions() {
+    await supabase.rpc('create_yellow_accumulation_suspensions');
+
+    const { data } = await supabase
+      .from('active_suspensions')
+      .select('*')
+      .order('matches_remaining', { ascending: false });
+
+    setSuspensions(data || []);
+  }
+
+  const activeTop = topMode === 'matches' ? topMatches : topTrainings;
 
   return (
     <div className="stack">
@@ -97,39 +111,55 @@ export function HomePage({ role, nextSession, selectedSession, players, attendan
         </div>
       </Card>
 
-      {cardWarnings.length > 0 && (
+      {(cardWarnings.length > 0 || suspensions.length > 0) && (
         <Card>
           <div className="row">
-            <p className="kicker">Avisos tarjetas</p>
+            <p className="kicker">Avisos tarjetas y sanciones</p>
             <AlertTriangle size={18} />
           </div>
-          <div className="card-warning-grid">
-            {cardWarnings.map((c: PlayerCardTotal) => (
-              <div key={c.player_id} className={Number(c.yellow_cards) >= 3 || Number(c.red_cards) > 0 ? 'card-warning-item danger' : 'card-warning-item'}>
-                <strong>{c.display_name}</strong>
-                <span>{c.yellow_cards} 🟨 {Number(c.red_cards) > 0 ? `· ${c.red_cards} 🟥` : ''}</span>
-              </div>
-            ))}
-          </div>
+
+          {suspensions.length > 0 && (
+            <div className="suspension-list">
+              {suspensions.map((s: any) => (
+                <div key={s.id} className="suspension-item">
+                  <Ban size={16} />
+                  <strong>{s.display_name}</strong>
+                  <span>{s.matches_remaining} partido(s) sanción</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {cardWarnings.length > 0 && (
+            <div className="card-warning-grid">
+              {cardWarnings.map((c: PlayerCardTotal) => (
+                <div key={c.player_id} className={Number(c.yellow_cards) >= 3 || Number(c.red_cards) > 0 ? 'card-warning-item danger' : 'card-warning-item'}>
+                  <strong>{c.display_name}</strong>
+                  <span>{c.yellow_cards} 🟨 {Number(c.red_cards) > 0 ? `· ${c.red_cards} 🟥` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 
       <Card>
         <div className="row">
-          <p className="kicker">{sessionTopPlayers.length > 0 ? 'Top sesión actual' : 'Top global'}</p>
+          <p className="kicker">Top global</p>
           <Trophy size={18} />
         </div>
 
-        {sessionTopPlayers.length > 0 ? (
-          sessionTopPlayers.map((e: Evaluation, index: number) => (
-            <div className="top-row" key={e.id}>
-              <span className="rank">#{index + 1}</span>
-              <strong>{findName(players, e.player_id)}</strong>
-              <span>{e.total_score}</span>
-            </div>
-          ))
-        ) : globalTop.length > 0 ? (
-          globalTop.map((p, index) => (
+        <div className="segmented mini">
+          <button className={topMode === 'matches' ? 'selected' : ''} onClick={() => setTopMode('matches')}>
+            Partidos
+          </button>
+          <button className={topMode === 'trainings' ? 'selected' : ''} onClick={() => setTopMode('trainings')}>
+            Entrenos
+          </button>
+        </div>
+
+        {activeTop.length > 0 ? (
+          activeTop.map((p, index) => (
             <div className="top-row" key={p.id}>
               <span className="rank">#{index + 1}</span>
               <strong>{p.name}</strong>
@@ -137,7 +167,7 @@ export function HomePage({ role, nextSession, selectedSession, players, attendan
             </div>
           ))
         ) : (
-          <p>Aún no hay evaluaciones.</p>
+          <p>Aún no hay evaluaciones de {topMode === 'matches' ? 'partidos' : 'entrenos'}.</p>
         )}
       </Card>
 
@@ -148,6 +178,26 @@ export function HomePage({ role, nextSession, selectedSession, players, attendan
   );
 }
 
-function findName(players: Player[], id: string) {
-  return players.find(p => p.id === id)?.display_name || 'Jugador';
+function buildTopRanking(rows: any[]) {
+  const grouped: Record<string, { name: string; scores: number[] }> = {};
+
+  rows.forEach((row: any) => {
+    if (!grouped[row.player_id]) {
+      grouped[row.player_id] = {
+        name: row.players?.display_name || 'Jugador',
+        scores: [],
+      };
+    }
+    grouped[row.player_id].scores.push(Number(row.total_score));
+  });
+
+  return Object.entries(grouped)
+    .map(([id, item]) => ({
+      id,
+      name: item.name,
+      average: item.scores.reduce((a, b) => a + b, 0) / item.scores.length,
+      count: item.scores.length,
+    }))
+    .sort((a, b) => b.average - a.average)
+    .slice(0, 3);
 }

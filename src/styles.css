@@ -454,3 +454,68 @@ p { line-height: 1.35; }
 }
 
 .page-title h2{margin-bottom:4px}.icon-btn.big{width:48px;height:48px}.modal-backdrop{position:fixed;inset:0;background:rgba(15,17,25,.45);z-index:20;display:grid;place-items:end center;padding:18px}.modal-card{width:min(560px,100%);max-height:88vh;overflow:auto;background:white;border-radius:24px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.22)}.list-row-button{width:100%;border:0;background:transparent;text-align:left;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:0;cursor:pointer;color:inherit}.avatar{width:42px;height:42px;border-radius:14px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}.small-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.profile-section{border-top:1px solid var(--line);padding-top:14px;margin-top:14px}.empty-chart{height:140px;display:grid;place-items:center;background:#f4f6fb;border:1px solid var(--line);border-radius:18px;color:var(--muted);font-weight:800}.chart-wrap{color:var(--accent);margin-top:10px}.line-chart{width:100%;height:160px;background:linear-gradient(180deg,#fff,#f2f4fa);border:1px solid var(--line);border-radius:18px;padding:12px}.chart-caption{font-size:12px;color:var(--muted);font-weight:800;margin-top:6px}.session-card.current{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.session-icon{width:46px;height:46px;border-radius:16px;display:grid;place-items:center;font-size:21px}.session-icon.match{background:#fff0f0}.session-icon.training{background:#edf3ff}.small-muted{font-size:12px;color:var(--muted)}.card-warning-grid{display:grid;gap:8px;margin-top:12px}.card-warning-item{display:flex;justify-content:space-between;gap:12px;padding:12px;border-radius:16px;background:#f4f6fb;border:1px solid var(--line)}.card-warning-item.danger{background:#fff3d8;border-color:#ffe0a3;color:#755100}.clickable{border:0;background:transparent;width:100%;text-align:left;color:inherit}.mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;text-align:center}.mini-grid div{background:#f5f6fb;border-radius:18px;padding:12px}.mini-grid strong{display:block;font-size:24px}.mini-grid span{font-size:12px;color:var(--muted);font-weight:800}.card-alert{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:10px 0}.card-alert:last-child{border-bottom:none}.summary-bar{margin-bottom:18px}.summary-top{display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px}.bar-track{height:12px;background:#edf0f5;border-radius:999px;overflow:hidden;position:relative}.bar-high{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:999px}.bar-low{position:absolute;right:0;top:0;bottom:0;background:#d85d5d;border-radius:999px}
+
+
+/* MOBILE RESPONSIVE + UX HOTFIX - append to src/styles.css */
+*{box-sizing:border-box}html,body,#root{width:100%;min-height:100%;margin:0;padding:0;overflow-x:hidden}body{-webkit-text-size-adjust:100%}img{max-width:100%}.app-shell{width:100%;min-height:100vh}.app{width:100%;max-width:820px;margin:0 auto;padding:12px;padding-bottom:104px}main{width:100%}.card{width:100%;overflow:hidden}.row{gap:10px;flex-wrap:wrap}.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{white-space:nowrap}.rating{display:grid;grid-template-columns:repeat(5,minmax(44px,1fr));gap:8px;width:100%}.rate{width:100%;min-width:0;min-height:48px}textarea,input,select,button{font-size:16px}.nav-grid{position:fixed;bottom:0;left:50%;transform:translateX(-50%);max-width:820px;width:100%;z-index:100}.card-warning-grid{display:grid;gap:8px;margin-top:10px}.card-warning-item,.suspension-item{display:flex;align-items:center;justify-content:space-between;gap:8px;border-radius:16px;padding:11px 12px;background:#f5f8ff;border:1px solid rgba(49,99,179,.12)}.card-warning-item.danger,.suspension-item{background:#fff1f1;border-color:#ffd4d4;color:#8a1f1f}.suspension-list{display:grid;gap:8px;margin:10px 0}.segmented.mini{margin:8px 0 12px}.soft-card{background:#f7fbff}.tiny-success{font-size:12px;color:#1f7a4d;margin-top:6px}@media(max-width:640px){.app{max-width:none;padding:10px;padding-bottom:96px}header{padding:10px 4px 8px}.header-left{min-width:0}.header-left h1{font-size:19px;line-height:1.1}.header-left p{font-size:12px;line-height:1.25}.club-logo{width:42px;height:42px;object-fit:contain;flex:0 0 auto}.role-pill{display:none}.hero-inner{flex-direction:column;align-items:flex-start}.hero-logo{width:64px;height:64px;opacity:.9}.progress-grid,.history-grid,.summary-hero{grid-template-columns:1fr!important}.top-row{font-size:14px}.score-badge{min-width:54px;min-height:54px;font-size:22px}.rating-header{align-items:flex-start}.limit-stack{width:100%;display:flex;flex-wrap:wrap;gap:6px}.nav-grid{max-width:none;overflow-x:auto;-webkit-overflow-scrolling:touch}.nav{min-width:72px}.card-warning-item,.suspension-item{align-items:flex-start;flex-direction:column}}@media(min-width:900px){.app{max-width:900px}main>.stack{max-width:760px;margin:0 auto}}
+/* Suspensions/history UI additions - append to src/styles.css */
+
+.suspension-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.suspension-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 16px;
+  padding: 11px 12px;
+  background: #fff1f1;
+  border: 1px solid #ffd4d4;
+  color: #8a1f1f;
+}
+
+.history-player-list {
+  display: grid;
+  gap: 12px;
+}
+
+.history-player-card {
+  border: 1px solid var(--line, #dfe6db);
+  border-radius: 18px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.score-mini {
+  background: var(--accent, #1f7a4d);
+  color: white;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+}
+
+.mini-ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.mini-ratings span {
+  background: white;
+  border: 1px solid var(--line, #dfe6db);
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .suspension-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
