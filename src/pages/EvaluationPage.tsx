@@ -7,12 +7,40 @@ import { translatePosition } from '../utils/formatters';
 import { getRatingCounts } from '../utils/stats';
 import { Card } from '../components/ui';
 
-const ratingFields = [
+const matchRatingFields = [
   ['tactical_discipline', 'Disciplina táctica'],
   ['effort_commitment', 'Esfuerzo / compromiso'],
   ['decision_making', 'Toma de decisiones'],
   ['mentality_attitude', 'Mentalidad / actitud'],
   ['coachability', 'Capacidad de corrección'],
+] as const;
+
+const trainingRatingFields = [
+  ['tactical_discipline', 'A. Esfuerzo / Intensidad', {
+    1: 'Indiferente / Desinteresado',
+    3: 'Aceptable / Normal',
+    5: 'Máximo esfuerzo, ritmo acelerado, intensidad',
+  }],
+  ['effort_commitment', 'B. Actitud / Lenguaje corporal', {
+    1: 'Negativo, quejoso, desinteresado',
+    3: 'Neutral',
+    5: 'Positivo, anima a sus compañeros',
+  }],
+  ['decision_making', 'C. Concentración / Capacidad de aprendizaje', {
+    1: 'No escucha, distraído',
+    3: 'Promedio',
+    5: 'Totalmente comprometido, aplica correcciones de inmediato',
+  }],
+  ['mentality_attitude', 'D. Nivel competitivo', {
+    1: 'Evita duelos, pasivo',
+    3: 'Compite con normalidad',
+    5: 'Muy competitivo, motiva a los demás',
+  }],
+  ['coachability', 'E. Calidad del desempeño', {
+    1: 'Ejecución deficiente',
+    3: 'Promedio',
+    5: 'Ejecución de alto nivel para su estándar',
+  }],
 ] as const;
 
 const cardOptions = [
@@ -234,6 +262,7 @@ export function EvaluationPage({
 
   const current: any = ev || { tactical_discipline: 3, effort_commitment: 3, decision_making: 3, mentality_attitude: 3, coachability: 3, comment: '' };
   const isMatch = ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(session.type);
+  const activeRatingFields = session.type === 'training' ? trainingRatingFields : matchRatingFields;
   const highLimit = session.high_rating_limit || 6;
   const lowLimit = session.low_rating_limit || 3;
 
@@ -270,10 +299,17 @@ export function EvaluationPage({
         </div>
       </Card>
 
-      {ratingFields.map(([field, label]) => (
+      {activeRatingFields.map(([field, label, description]) => (
         <Card key={field}>
           <div className="row rating-header">
             <strong>{label}</strong>
+            {description && (
+  <div className="evaluation-help">
+    <p><strong>1</strong> — {description[1]}</p>
+    <p><strong>3</strong> — {description[3]}</p>
+    <p><strong>5</strong> — {description[5]}</p>
+  </div>
+)}
             <div className="limit-stack">
               <span className={counters.high[field] >= highLimit ? 'limit danger' : 'limit'}>Altas: {counters.high[field]}/{highLimit}</span>
               <span className={counters.low[field] >= lowLimit ? 'limit danger' : 'limit'}>Bajas: {counters.low[field]}/{lowLimit}</span>

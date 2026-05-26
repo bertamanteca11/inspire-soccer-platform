@@ -519,3 +519,18 @@ p { line-height: 1.35; }
     flex-direction: column;
   }
 }
+
+.evaluation-help {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #f5f8ff;
+  border: 1px solid rgba(49, 99, 179, 0.12);
+  font-size: 12px;
+  color: #526070;
+}
+
+.evaluation-help p {
+  margin: 3px 0;
+}
