@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, RotateCcw, Save, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Player, Role } from '../types';
@@ -12,6 +12,7 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
   const [suspensions, setSuspensions] = useState<any[]>([]);
   const [localLocked, setLocalLocked] = useState(!!session.callup_confirmed);
   const [loading, setLoading] = useState(true);
+  const playerRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const locked = localLocked;
   const isAdmin = role === 'admin';
@@ -115,6 +116,8 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
 
     setError('');
     const existing = callups.find(c => c.player_id === player.id);
+    const currentIndex = players.findIndex(p => p.id === player.id);
+    const nextPlayer = players[(currentIndex + 1) % players.length];
 
     if (existing) {
       const { error } = await supabase.from('callups').delete().eq('id', existing.id);
@@ -122,22 +125,29 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
 
       await supabase.from('attendance').delete().eq('session_id', session.id).eq('player_id', player.id);
       await supabase.from('evaluations').delete().eq('session_id', session.id).eq('player_id', player.id);
+      setCallups(prev => prev.filter(c => c.player_id !== player.id));
     } else {
       const evaluable = player.status !== 'guest';
       const status = player.status === 'trial' ? 'trial' : player.status === 'guest' ? 'guest_not_evaluable' : 'called_up';
 
-      const { error } = await supabase.from('callups').insert({
+      const { data, error } = await supabase.from('callups').insert({
         session_id: session.id,
         player_id: player.id,
         status,
         evaluable,
-      });
+      }).select('*').single();
 
       if (error) { setError(error.message); return; }
+      if (data) setCallups(prev => [...prev.filter(c => c.player_id !== player.id), data]);
     }
 
-    await loadCallups();
-    await reload(session.id);
+    // Keep the user in the list and move directly to the next player instead
+    // of reloading the whole page and jumping back to the top.
+    requestAnimationFrame(() => {
+      if (nextPlayer && nextPlayer.id !== player.id) {
+        playerRefs.current[nextPlayer.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
   }
 
   if (loading) {
@@ -182,7 +192,8 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
       {players.map(player => {
         const selected = callups.some(c => c.player_id === player.id);
         return (
-          <Card key={player.id}>
+          <div key={player.id} ref={node => { playerRefs.current[player.id] = node; }}>
+          <Card>
             <div className="row">
               <div>
                 <strong>{player.shirt_number ? `${player.shirt_number}. ` : ''}{player.display_name}</strong>
@@ -193,6 +204,7 @@ export function CallupPage({ role, session, reload, setError }: { role: Role; se
               </button>
             </div>
           </Card>
+          </div>
         );
       })}
     </div>

@@ -1,44 +1,68 @@
-import React from 'react';
-import { ClipboardList, Star, Users, Activity, BarChart3, CalendarDays, HeartPulse, Shield } from 'lucide-react';
+import React, { useState } from 'react';
+import { ClipboardList, Star, Users, Activity, BarChart3, CalendarDays, HeartPulse, Shield, MoreHorizontal, X } from 'lucide-react';
 import type { Role } from '../types';
 import type { Tab } from '../utils/appTypes';
 
 export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab: (tab: Tab) => void }) {
+  const [moreOpen, setMoreOpen] = useState(false);
   const isAdmin = role === 'admin';
 
-  if (role === 'coach') {
-    return (
-      <nav className="nav-grid coach">
-        <NavButton active={tab === 'attendance'} onClick={() => setTab('attendance')} icon={<ClipboardList />} label="Asistencia" />
-        <NavButton active={tab === 'evaluation'} onClick={() => setTab('evaluation')} icon={<Star />} label="Evaluar" />
-      </nav>
-    );
-  }
+  const go = (next: Tab) => {
+    setTab(next);
+    setMoreOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const secondaryTabs: Tab[] = ['callup', 'attendance', 'evaluation', 'standouts', 'injuries', 'history', 'intelligence', 'reports'];
 
   return (
-    <nav className={isAdmin ? 'nav-grid admin' : 'nav-grid'}>
-      <NavButton active={tab === 'home'} onClick={() => setTab('home')} icon={<Activity />} label="Inicio" />
-      {isAdmin && (
-        <>
-          <NavButton active={tab === 'players'} onClick={() => setTab('players')} icon={<Users />} label="Jugadores" />
-          <NavButton active={tab === 'sessions'} onClick={() => setTab('sessions')} icon={<CalendarDays />} label="Sesiones" />
-        </>
+    <>
+      {moreOpen && (
+        <div className="more-backdrop" onClick={() => setMoreOpen(false)}>
+          <div className="more-sheet" onClick={e => e.stopPropagation()}>
+            <div className="more-sheet-head">
+              <div><p className="kicker">Inspire Soccer</p><h3>Más herramientas</h3></div>
+              <button className="icon-btn" onClick={() => setMoreOpen(false)} aria-label="Cerrar"><X size={20} /></button>
+            </div>
+            <div className="more-menu-grid">
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('callup')} icon={<Users />} label="Convocatoria" />}
+              <MoreItem onClick={() => go('attendance')} icon={<ClipboardList />} label="Asistencia" />
+              <MoreItem onClick={() => go('evaluation')} icon={<Star />} label="Evaluar" />
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('standouts')} icon={<Star />} label="Standouts" />}
+              <MoreItem onClick={() => go('injuries')} icon={<HeartPulse />} label="Lesiones" />
+              {isAdmin && <MoreItem onClick={() => go('intelligence')} icon={<Shield />} label="Weekly flags" />}
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('reports')} icon={<BarChart3 />} label="Reports" />}
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('history')} icon={<Shield />} label="Histórico" />}
+            </div>
+          </div>
+        </div>
       )}
-      {isAdmin && <NavButton active={tab === 'callup'} onClick={() => setTab('callup')} icon={<Users />} label="Convocatoria" />}
-      <NavButton active={tab === 'attendance'} onClick={() => setTab('attendance')} icon={<ClipboardList />} label="Asistencia" />
-      <NavButton active={tab === 'evaluation'} onClick={() => setTab('evaluation')} icon={<Star />} label="Evaluar" />
-      <NavButton active={tab === 'injuries'} onClick={() => setTab('injuries')} icon={<HeartPulse />} label="Lesiones" />
-      <NavButton active={tab === 'summary'} onClick={() => setTab('summary')} icon={<BarChart3 />} label="Resumen" />
-      {isAdmin && <NavButton active={tab === 'history'} onClick={() => setTab('history')} icon={<Shield />} label="Histórico" />}
-    </nav>
+
+      <nav className="nav-grid primary-nav">
+        <NavButton active={tab === 'home'} onClick={() => go('home')} icon={<Activity />} label="Inicio" />
+        {(isAdmin || role === 'coach') && <NavButton active={tab === 'players'} onClick={() => go('players')} icon={<Users />} label="Equipo" />}
+        {(isAdmin || role === 'coach') && <NavButton active={tab === 'sessions'} onClick={() => go('sessions')} icon={<CalendarDays />} label="Sesiones" />}
+        <NavButton active={tab === 'summary'} onClick={() => go('summary')} icon={<BarChart3 />} label="Resumen" />
+        <NavButton active={secondaryTabs.includes(tab)} onClick={() => setMoreOpen(true)} icon={<MoreHorizontal />} label="Más" />
+      </nav>
+    </>
   );
 }
 
 function NavButton({ active, onClick, icon, label }: any) {
   return (
     <button className={active ? 'nav active' : 'nav'} onClick={onClick}>
-      {React.cloneElement(icon, { size: 18 })}
+      {React.cloneElement(icon, { size: 20 })}
       <span>{label}</span>
+    </button>
+  );
+}
+
+function MoreItem({ onClick, icon, label }: any) {
+  return (
+    <button className="more-item" onClick={onClick}>
+      <span className="more-item-icon">{React.cloneElement(icon, { size: 21 })}</span>
+      <strong>{label}</strong>
     </button>
   );
 }

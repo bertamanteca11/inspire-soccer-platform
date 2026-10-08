@@ -36,11 +36,6 @@ const trainingRatingFields = [
     3: 'Compite con normalidad',
     5: 'Muy competitivo, motiva a los demás',
   }],
-  ['coachability', 'E. Calidad del desempeño', {
-    1: 'Ejecución deficiente',
-    3: 'Promedio',
-    5: 'Ejecución de alto nivel para su estándar',
-  }],
 ] as const;
 
 const cardOptions = [
@@ -354,7 +349,7 @@ export function EvaluationPage({
       </Card>
 
       <button className="primary" onClick={next} disabled={locked}>Siguiente jugador <ChevronRight size={18} /></button>
-      <button className="secondary" disabled={index === 0 || locked} onClick={() => setIndex(i => Math.max(0, i - 1))}>Anterior</button>
+      <button className="secondary" disabled={locked} onClick={() => setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length)}>Anterior</button>
     </div>
   );
 }

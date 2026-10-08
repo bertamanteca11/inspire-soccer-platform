@@ -1,6 +1,6 @@
 import type { Session } from '../types';
 
-export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'history';
+export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'standouts'|'history'|'intelligence'|'reports';
 
 export type AppSession = Session & {
   start_time?: string | null;

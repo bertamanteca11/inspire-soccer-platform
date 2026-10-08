@@ -17,6 +17,9 @@ import { EvaluationPage } from './pages/EvaluationPage';
 import { InjuriesPage } from './pages/InjuriesPage';
 import { SummaryPage } from './pages/SummaryPage';
 import { HistoryPage } from './pages/HistoryPage';
+import { StandoutsPage } from './pages/StandoutsPage';
+import { IntelligencePage } from './pages/IntelligencePage';
+import { ReportsPage } from './pages/ReportsPage';
 
 const DEV_BYPASS_LOGIN = false;
 const LOGO_URL = '/assets/logo.png';
@@ -127,7 +130,7 @@ function Platform({ role }: { role: Role }) {
   }, []);
 
   useEffect(() => {
-  if (role === 'coach' && !['attendance', 'evaluation'].includes(tab)) {
+  if (role === 'coach' && ['intelligence', 'history'].includes(tab)) {
     setTab('attendance');
   }
   }, [role, tab]);
@@ -165,14 +168,17 @@ function Platform({ role }: { role: Role }) {
 
         <main>
           {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
-          {tab === 'players' && isAdmin && <PlayersPage />}
-          {tab === 'sessions' && isAdmin && <SessionsPage reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} />}
+          {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
+          {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} />}
           {tab === 'callup' && selectedSession && (isAdmin || isCoach) && <CallupPage role={role} session={selectedSession} reload={load} setError={setError} />}
           {tab === 'attendance' && selectedSession && <AttendancePage role={role} session={selectedSession} players={players} attendance={attendance} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'evaluation' && selectedSession && <EvaluationPage role={role} session={selectedSession} players={players} evaluations={evaluations} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'injuries' && selectedSession && <InjuriesPage session={selectedSession} players={players} reload={load} setError={setError} role={role} />}
           {tab === 'summary' && <SummaryPage />}
-          {tab === 'history' && isAdmin && <HistoryPage />}
+          {tab === 'standouts' && <StandoutsPage role={role} />}
+          {tab === 'intelligence' && isAdmin && <IntelligencePage />}
+          {tab === 'reports' && (isAdmin || isCoach) && <ReportsPage />}
+          {tab === 'history' && (isAdmin || isCoach) && <HistoryPage />}
 
           {['callup', 'attendance', 'evaluation', 'injuries'].includes(tab) && !selectedSession && (
             <Card>
@@ -199,7 +205,10 @@ function getHeaderTitle(tab: Tab) {
     evaluation: 'Evaluación',
     injuries: 'Lesiones',
     summary: 'Resumen',
+    standouts: 'Standouts',
     history: 'Histórico',
+    intelligence: 'Weekly Intelligence',
+    reports: 'Reports',
   };
 
   return map[tab];
