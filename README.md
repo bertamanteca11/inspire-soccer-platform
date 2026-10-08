@@ -34,8 +34,3 @@ Registra usuarios desde la app. Luego en Supabase Table Editor cambia su rol en 
 - `coach`
 - `viewer`
 
-## Deploy gratis en Vercel
-1. Sube este proyecto a GitHub.
-2. Crea proyecto en Vercel.
-3. Añade variables `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
-4. Deploy.
