@@ -28,10 +28,10 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
               {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('callup')} icon={<Users />} label="Convocatoria" />}
               <MoreItem onClick={() => go('attendance')} icon={<ClipboardList />} label="Asistencia" />
               <MoreItem onClick={() => go('evaluation')} icon={<Star />} label="Evaluar" />
-              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('standouts')} icon={<Star />} label="Standouts" />}
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('standouts')} icon={<Star />} label="Destacados" />}
               <MoreItem onClick={() => go('injuries')} icon={<HeartPulse />} label="Lesiones" />
-              {isAdmin && <MoreItem onClick={() => go('intelligence')} icon={<Shield />} label="Weekly flags" />}
-              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('reports')} icon={<BarChart3 />} label="Reports" />}
+              {isAdmin && <MoreItem onClick={() => go('intelligence')} icon={<Shield />} label="Seguimiento semanal" />}
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('reports')} icon={<BarChart3 />} label="Informes" />}
               {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('history')} icon={<Shield />} label="Histórico" />}
             </div>
           </div>

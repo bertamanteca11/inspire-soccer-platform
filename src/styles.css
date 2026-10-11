@@ -649,3 +649,33 @@ header h1 { font-weight: 900; letter-spacing: -.035em; }
 .standout-heading.bottom>svg{background:#eceeea}.standout-heading h3{margin:0 0 3px}.standout-heading p{margin:0;font-size:12px;color:var(--muted)}
 .standout-select{display:grid;gap:6px;margin-top:12px;font-size:12px;font-weight:800}.standout-select select{min-height:50px}
 .standout-save{display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+
+/* Inspire Soccer · 2026 interface refinement */
+:root { --brand-navy:#122c55; }
+body { -webkit-font-smoothing:antialiased; }
+.app { max-width:1100px; }
+.card { border-radius:18px; }
+button, input, select, textarea { transition: border-color .18s, box-shadow .18s, transform .18s; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline:3px solid #76a8ff; outline-offset:2px; }
+.brand-symbol,.hero-mark {display:inline-flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;background:linear-gradient(145deg,#142f5b,#0b1a32);color:#eaf3ff;border:1px solid #526f9e;border-radius:16px;width:56px;height:56px;box-shadow:0 7px 20px #07172c33}
+.brand-symbol span,.hero-mark span {position:absolute;font-size:10px;font-weight:900;letter-spacing:-.4px}
+.hero-mark {width:80px;height:80px;border-radius:23px}
+.hero-mark span {font-size:14px}
+.weekly-shortcut {display:flex;align-items:center;text-align:left;gap:14px;width:100%;padding:18px;border:1px solid #a9bedb;border-radius:18px;background:linear-gradient(110deg,#eaf2fc,#f7faff);color:#142c4e;cursor:pointer}
+.weekly-shortcut>span:nth-child(2) {display:flex;flex-direction:column;flex:1;gap:4px}
+.weekly-shortcut small {font-size:12px;line-height:1.4;color:#4b617d}
+.weekly-shortcut-icon {display:grid;place-items:center;border-radius:12px;background:#193c6e;color:white;width:44px;height:44px}
+.save-feedback {border-radius:12px;padding:12px 14px;background:#e9f4ff;color:#1a4570;font-weight:600;margin:10px 0}
+.save-feedback.success {background:#e5f7eb;color:#17613b;border:1px solid #b3e2c2}
+.save-feedback.failure {background:#fff0f0;color:#9b2323;border:1px solid #efb5b5}
+.illustrated-avatar {display:inline-flex;overflow:hidden;border-radius:50%;background:#d9e5ed;border:2px solid #dce6f0;flex-shrink:0}
+.avatar-editor {padding:15px;border:1px solid #dce5f1;border-radius:15px}
+.avatar-options {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:12px 0}
+.avatar-choice {display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px;background:#f4f7fb;border:2px solid transparent;border-radius:12px;cursor:pointer}
+.avatar-choice.selected {border-color:#2c64ae;background:#e8f1fc}
+.avatar-choice .player-photo {width:54px;height:54px}
+.avatar-choice small {font-size:10px;color:#294160}
+@media(min-width:680px){.avatar-options{grid-template-columns:repeat(6,minmax(0,1fr))}}
+
+/* Seguimiento semanal: panel de lectura rápida */
+.weekly-page{max-width:1100px;margin:0 auto;width:100%}.weekly-hero{background:linear-gradient(115deg,#111e2c,#253c50);color:#fff;border-radius:22px;padding:26px;display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}.weekly-hero h2{font-size:clamp(23px,3vw,33px);line-height:1.15;margin:9px 0}.weekly-hero p{color:#d4e1e9;max-width:620px;margin:0}.weekly-eyebrow{font-size:11px;letter-spacing:.12em;font-weight:800;color:#4e8294}.weekly-hero .weekly-eyebrow{color:#9ad4df}.weekly-date{background:rgba(255,255,255,.12);border-radius:14px;padding:12px;font-size:12px;display:grid;gap:7px;min-width:210px}.weekly-date input{background:white;color:#182536;border:0;border-radius:9px;padding:9px}.weekly-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.weekly-metric{background:#fff;border:1px solid #e2e9ed;border-radius:16px;padding:18px;display:grid;gap:6px}.weekly-metric span{font-size:13px;font-weight:700;color:#526070}.weekly-metric strong{font-size:30px;color:#182536}.weekly-metric small{color:#77828b}.weekly-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.weekly-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.weekly-section-heading h3{margin:5px 0 8px}.weekly-pill{background:#e9f3f4;border-radius:99px;padding:6px 10px;font-size:11px;font-weight:800;color:#315d67;white-space:nowrap}.weekly-list{display:grid;gap:8px;margin-top:16px}.weekly-person{display:flex;align-items:center;gap:12px;padding:12px;background:#f6f8fa;border-radius:12px}.weekly-person>div{flex:1;display:grid;gap:3px}.weekly-person small{font-size:11px;color:#667684}.weekly-rank{display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:#dce9ee;font-weight:800}.weekly-score{font-weight:800;font-size:18px}.weekly-score small{font-size:10px}.weekly-concern{background:#fff8ed;border:1px solid #f3e5ce;padding:13px;border-radius:12px}.weekly-concern ul{margin:8px 0 0;padding-left:20px;color:#77552d;font-size:13px}.weekly-empty{background:#f5f8fa;color:#637484;padding:18px;border-radius:12px;margin-top:14px}.weekly-notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin:14px 0}.weekly-note{padding:14px;border:1px solid #e2e9ed;border-radius:13px;background:#f9fbfc;display:grid;gap:6px}.weekly-note span{font-size:12px;color:#527482}.weekly-note p{margin:0;white-space:pre-wrap}.weekly-form-heading{margin:20px 0 10px}.weekly-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.weekly-form label{display:grid;gap:6px;font-weight:700;font-size:13px}.weekly-form select,.weekly-form textarea{width:100%}.weekly-form-full{grid-column:1/-1}.weekly-form button{justify-self:start}.weekly-month{display:grid;gap:6px;max-width:220px;margin:12px 0;font-weight:700;font-size:13px}@media(max-width:720px){.weekly-columns,.weekly-metrics,.weekly-form{grid-template-columns:1fr}.weekly-hero{padding:20px}.weekly-date{width:100%}.weekly-form-full{grid-column:auto}}

@@ -1,4 +1,4 @@
-import { AlertTriangle, Trophy, Ban, ClipboardList } from 'lucide-react';
+import { AlertTriangle, Trophy, Ban, ClipboardList, Shield, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
@@ -89,10 +89,11 @@ export function HomePage({
             <h2>{nextSession?.name || 'No hay sesión próxima'}</h2>
             <p>{nextSession ? buildSessionLabel(nextSession) : 'Crea una sesión para empezar'}</p>
           </div>
-          <img src={LOGO_URL} className="hero-logo" alt="Inspire Soccer" />
+          <div className="hero-mark" aria-hidden="true"><Shield size={42}/><span>IS</span></div>
         </div>
       </Card>
 
+      {role === 'admin' && <button className="weekly-shortcut" onClick={()=>setTab('intelligence')}><span className="weekly-shortcut-icon"><Shield size={23}/></span><span><strong>Seguimiento semanal</strong><small>Rendimiento, alertas y notas privadas del equipo</small></span><ChevronRight size={20}/></button>}
       <Card>
         <p className="kicker">Panel rápido</p>
         <div className="progress-grid">

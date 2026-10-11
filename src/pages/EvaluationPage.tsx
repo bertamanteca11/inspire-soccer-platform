@@ -45,7 +45,10 @@ const cardOptions = [
   ['straight_red', 'Roja directa'],
 ] as const;
 
-const absentStatuses = ['justified_absence', 'unjustified_absence'];
+const DEFAULT_SCORE = 3;
+const ALL_SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'] as const;
+
+const absentStatuses = ['justified_absence', 'unjustified_absence', 'injured', 'injured_present', 'injured_justified_absence', 'injured_unjustified_absence'];
 
 export function EvaluationPage({
   role,
@@ -65,6 +68,10 @@ export function EvaluationPage({
   moveToNextOpenSession?: any;
 }) {
   const [index, setIndex] = useState(0);
+  const [mode, setMode] = useState<'category' | 'player'>('category');
+  const [categoryIndex, setCategoryIndex] = useState(0);
+  const [comments, setComments] = useState<Record<string,string>>({});
+  const [savedNotice, setSavedNotice] = useState('');
   const [cardType, setCardType] = useState('none');
   const [cardReason, setCardReason] = useState('');
   const [suspensionMatches, setSuspensionMatches] = useState('1');
@@ -75,7 +82,7 @@ export function EvaluationPage({
   const locked = localLocked;
   const isAdmin = role === 'admin';
 
-  useEffect(() => setLocalEvaluations(evaluations || []), [evaluations]);
+  useEffect(() => { setLocalEvaluations(evaluations || []); setComments(Object.fromEntries((evaluations || []).map(e => [e.player_id, e.comment || '']))); }, [evaluations]);
   useEffect(() => setLocalLocked(!!session.evaluation_confirmed), [session.evaluation_confirmed]);
   useEffect(() => { loadAttendance(); }, [session.id]);
 
@@ -87,7 +94,7 @@ export function EvaluationPage({
   const evaluablePlayers = useMemo(() => {
     return players.filter((p: Player) => {
       const att = attendance.find((a: Attendance) => a.player_id === p.id);
-      return !absentStatuses.includes(att?.status || '');
+      return !!att && ['present','late','justified_late'].includes(att.status);
     });
   }, [players, attendance]);
 
@@ -103,12 +110,13 @@ export function EvaluationPage({
   if (!session.attendance_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la asistencia. Así los ausentes quedan fuera de evaluación y no cuentan en las medias.</p></Card></div>;
   if (evaluablePlayers.length === 0) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>Los jugadores ausentes no aparecen en evaluación ni cuentan en las medias.</p></Card></div>;
 
-  async function ensureEval(): Promise<Evaluation | null> {
-    if (ev) return ev;
+  async function ensureEval(target: Player = player): Promise<Evaluation | null> {
+    const existing = localEvaluations.find(e => e.player_id === target.id);
+    if (existing) return existing;
 
     const { data, error } = await supabase
       .from('evaluations')
-      .insert({ session_id: session.id, player_id: player.id })
+      .insert({ session_id: session.id, player_id: target.id })
       .select('*')
       .single();
 
@@ -121,11 +129,11 @@ export function EvaluationPage({
     return data as Evaluation;
   }
 
-  async function update(field: string, value: number | string | boolean) {
+  async function update(field: string, value: number | string | boolean, target: Player = player) {
     if (locked) return false;
     setError('');
 
-    const currentValue = Number((ev as any)?.[field]);
+    const currentValue = Number((localEvaluations.find(e => e.player_id === target.id) as any)?.[field]);
     const highLimit = session.high_rating_limit || 6;
     const lowLimit = session.low_rating_limit || 3;
 
@@ -146,7 +154,7 @@ export function EvaluationPage({
       }
     }
 
-    const record = await ensureEval();
+    const record = await ensureEval(target);
     if (!record) return false;
 
     const { data, error } = await supabase
@@ -159,6 +167,7 @@ export function EvaluationPage({
     if (error) { setError(cleanDbError(error.message)); return false; }
 
     setLocalEvaluations(prev => [...prev.filter(e => e.id !== data.id), data as Evaluation]);
+    setSavedNotice('Cambios guardados correctamente');
     return true;
   }
 
@@ -211,10 +220,15 @@ export function EvaluationPage({
   }
 
   async function next() {
+    if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) {
+      const okComment = await update('comment', comments[player.id] ?? '', player);
+      if (!okComment) return;
+    }
     const okCard = await saveCardIfNeeded();
     if (!okCard) return;
 
-    await update('evaluated', true);
+    const saved = await update('evaluated', true);
+    if (!saved) return;
     setIndex(current => (current + 1) % evaluablePlayers.length);
   }
 
@@ -222,6 +236,26 @@ export function EvaluationPage({
     const confirmed = window.confirm('¿Confirmar evaluación? El coach no podrá modificarla después.');
     if (!confirmed) return;
 
+    // Persist the displayed default 3 for every eligible player before locking.
+    // Never overwrite existing scores (including values 1, 2, 4 or 5).
+    setError('');
+    const { data: latest, error: readError } = await supabase.from('evaluations').select('*').eq('session_id', session.id);
+    if (readError) { setError('No se pudieron revisar las evaluaciones: ' + readError.message); return; }
+    const existingByPlayer = new Map((latest || []).map((record: any) => [record.player_id, record]));
+    for (const target of evaluablePlayers) {
+      const existing = existingByPlayer.get(target.id) as any;
+      const defaults: Record<string, number> = {};
+      for (const field of ALL_SCORE_FIELDS) {
+        if (existing?.[field] == null) defaults[field] = DEFAULT_SCORE;
+      }
+      if (!existing) {
+        const { error } = await supabase.from('evaluations').insert({session_id:session.id, player_id:target.id, ...defaults, evaluated:true});
+        if (error) { setError('No se pudo guardar la evaluación de ' + target.display_name + ': ' + error.message); return; }
+      } else if (Object.keys(defaults).length || !existing.evaluated) {
+        const { error } = await supabase.from('evaluations').update({...defaults, evaluated:true}).eq('id', existing.id);
+        if (error) { setError('No se pudo completar la evaluación de ' + target.display_name + ': ' + error.message); return; }
+      }
+    }
     await supabase.rpc('create_yellow_accumulation_suspensions');
 
     const { error } = await supabase
@@ -266,7 +300,7 @@ export function EvaluationPage({
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
         <p className="kicker">Evaluación</p>
         <h2>{session.name}</h2>
-        <p className="muted">Los jugadores ausentes no aparecen aquí ni cuentan en las medias.</p>
+        <p className="muted">La puntuación 3 se aplica por defecto a las cualidades sin evaluar y se guarda al confirmar. Solo aparecen jugadores convocados con asistencia registrada como presente o tarde. Los lesionados presentes no se evalúan.</p>
 
         {locked ? (
           <div className="stack">
@@ -278,6 +312,13 @@ export function EvaluationPage({
         )}
       </Card>
 
+      {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
+      <Card><div className="row"><strong>Orden de evaluación</strong><select aria-label="Orden de evaluación" value={mode} onChange={e => setMode(e.target.value as 'category'|'player')}><option value="category">Por cualidad (todos los jugadores)</option><option value="player">Por jugador (todas las cualidades)</option></select></div></Card>
+      {mode === 'category' ? <>
+        <Card><strong>Cualidad que estás evaluando</strong><select value={categoryIndex} onChange={e => setCategoryIndex(Number(e.target.value))}>{(session.type === 'training' ? trainingRatingFields : matchRatingFields).map(([field,label],i) => <option key={field} value={i}>{label}</option>)}</select></Card>
+        {(session.type === 'training' ? trainingRatingFields : matchRatingFields).slice(categoryIndex,categoryIndex+1).map(([field,label]) => <Card key={field}><h2>{label}</h2><p className="muted">Valora esta cualidad en todos los jugadores antes de pasar a la siguiente.</p>{evaluablePlayers.map(p => {const rating = localEvaluations.find(e => e.player_id === p.id); return <div key={p.id} className="rating-player-row"><strong>{p.display_name}</strong><div className="rating">{[1,2,3,4,5].map(n => <button key={n} disabled={locked} className={((rating as any)?.[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field,n,p)}>{n}</button>)}</div></div>})}</Card>)}
+        <div className="row"><button className="secondary" disabled={categoryIndex===0} onClick={()=>setCategoryIndex(i=>i-1)}>Cualidad anterior</button><button className="primary" onClick={()=>{if(categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1)setCategoryIndex(i=>i+1);else setMode('player')}}>{categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1 ? 'Siguiente cualidad' : 'Revisar comentarios'}</button></div>
+      </> : <>
       <div className="progress">{index + 1} / {evaluablePlayers.length}</div>
 
       <Card>
@@ -292,6 +333,7 @@ export function EvaluationPage({
           <div><p className="kicker">Jugador</p><h2>{player.display_name}</h2><p>{translatePosition(player.position)}</p></div>
           <div className="score-badge">{current.total_score || '-'}</div>
         </div>
+        <div className="row" style={{marginTop:12}}><button className="secondary" disabled={locked} onClick={()=>setIndex(i=>(i-1+evaluablePlayers.length)%evaluablePlayers.length)}>← Anterior</button><button className="primary" disabled={locked} onClick={next}>Siguiente jugador →</button></div>
       </Card>
 
       {activeRatingFields.map(([field, label, description]) => (
@@ -312,7 +354,7 @@ export function EvaluationPage({
           </div>
           <div className="rating">
             {[1, 2, 3, 4, 5].map(n => (
-              <button disabled={locked} key={n} className={current[field] === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
+              <button disabled={locked} key={n} className={(current[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
             ))}
           </div>
         </Card>
@@ -343,13 +385,15 @@ export function EvaluationPage({
         </Card>
       )}
 
-      <Card>
-        <strong>Comentario corto</strong>
-        <textarea disabled={locked} defaultValue={current.comment || ''} onBlur={e => update('comment', e.target.value)} placeholder="Comentario corto..." />
+      <Card key={'comment-'+player.id}>
+        <strong>Comentario de {player.display_name}</strong>
+        <textarea disabled={locked} value={comments[player.id] ?? current.comment ?? ''} onChange={e => setComments(prev => ({...prev,[player.id]:e.target.value}))} onBlur={e => {if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) void update('comment',comments[player.id] ?? '',player)}} placeholder="Comentario individual..." />
+        <button className="secondary" disabled={locked} onClick={()=>void update('comment',comments[player.id] ?? '',player)}>Guardar comentario</button>
       </Card>
 
       <button className="primary" onClick={next} disabled={locked}>Siguiente jugador <ChevronRight size={18} /></button>
       <button className="secondary" disabled={locked} onClick={() => setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length)}>Anterior</button>
+      </>}
     </div>
   );
 }

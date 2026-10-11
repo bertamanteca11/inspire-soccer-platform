@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, Shield } from 'lucide-react';
 import { supabase } from './supabase';
 import type { Attendance, Evaluation, Player, Role } from './types';
 import type { AppSession, PlayerCardTotal, Tab } from './utils/appTypes';
@@ -149,7 +149,7 @@ function Platform({ role }: { role: Role }) {
       <div className="app">
         <header>
           <div className="header-left">
-            <img src={LOGO_URL} className="club-logo" alt="Inspire Soccer" />
+            <span className="brand-symbol" aria-label="Inspire Soccer"><Shield size={24}/><span>IS</span></span>
             <div>
               <h1>{headerTitle}</h1>
               <p>{headerSubtitle}</p>
@@ -157,7 +157,7 @@ function Platform({ role }: { role: Role }) {
           </div>
 
           <div className="header-actions">
-            <span className="role-pill">{role === 'admin' ? 'Admin' : role === 'coach' ? 'Coach' : 'Viewer'}</span>
+            <span className="role-pill">{role === 'admin' ? 'Admin' : role === 'coach' ? 'Entrenador' : 'Consulta'}</span>
             <button className="icon-btn" onClick={() => supabase.auth.signOut()}>
               <LogOut size={18} />
             </button>
@@ -205,10 +205,10 @@ function getHeaderTitle(tab: Tab) {
     evaluation: 'Evaluación',
     injuries: 'Lesiones',
     summary: 'Resumen',
-    standouts: 'Standouts',
+    standouts: 'Destacados',
     history: 'Histórico',
-    intelligence: 'Weekly Intelligence',
-    reports: 'Reports',
+    intelligence: 'Seguimiento semanal',
+    reports: 'Informes',
   };
 
   return map[tab];

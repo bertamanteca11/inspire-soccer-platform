@@ -12,7 +12,10 @@ const attendanceOptions = [
   ['justified_late', 'Tarde justificado'],
   ['justified_absence', 'Ausencia justificada'],
   ['unjustified_absence', 'Ausencia'],
-  ['injured', 'Lesionado'],
+  ['injured', 'Lesionado (sin especificar)'],
+  ['injured_present', 'Lesionado presente (fisio)'],
+  ['injured_justified_absence', 'Lesionado ausente justificado'],
+  ['injured_unjustified_absence', 'Lesionado ausente no justificado'],
 ] as const;
 
 const attendanceNeedsExplanation = [
@@ -21,9 +24,12 @@ const attendanceNeedsExplanation = [
   'justified_absence',
   'unjustified_absence',
   'injured',
+  'injured_present',
+  'injured_justified_absence',
+  'injured_unjustified_absence',
 ];
 
-const absentStatuses = ['justified_absence', 'unjustified_absence'];
+const absentStatuses = ['justified_absence', 'unjustified_absence', 'injured', 'injured_present', 'injured_justified_absence', 'injured_unjustified_absence'];
 
 export function AttendancePage({
   role,
@@ -46,6 +52,17 @@ export function AttendancePage({
   const [localAttendance, setLocalAttendance] = useState<Attendance[]>(attendance || []);
   const [localLocked, setLocalLocked] = useState(!!session.attendance_confirmed);
   const [saving, setSaving] = useState(false);
+  const [roster, setRoster] = useState<Player[]>([]);
+  const [savedNotice, setSavedNotice] = useState('');
+  const [calledIds, setCalledIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    supabase.from('callups').select('player_id,status').eq('session_id',session.id).then(({data,error}) => { if(error)setError(error.message);else setCalledIds(new Set((data||[]).filter(c=>c.status!=='not_called').map(c=>c.player_id))); });
+    supabase.from('players').select('*').in('status', ['active', 'injured', 'trial', 'guest']).order('display_name').then(({data,error}) => {
+      if (error) setError(error.message);
+      else setRoster((data || []) as Player[]);
+    });
+  }, [session.id]);
+  const attendancePlayers = roster.length ? roster : players;
 
   const locked = localLocked;
   const isAdmin = role === 'admin';
@@ -54,27 +71,29 @@ export function AttendancePage({
     setLocalAttendance(attendance || []);
 
     const initial: Record<string, { status: string; notes: string }> = {};
-    players.forEach((p: Player) => {
+    attendancePlayers.forEach((p: Player) => {
       const rec = (attendance || []).find((a: Attendance) => a.player_id === p.id);
       initial[p.id] = {
-        status: rec?.status || 'present',
+        status: rec?.status ?? 'present',
         notes: rec?.notes || '',
       };
     });
     setDrafts(initial);
-  }, [attendance, players]);
+  }, [attendance, players, roster]);
 
   useEffect(() => {
     setLocalLocked(!!session.attendance_confirmed);
   }, [session.attendance_confirmed]);
 
-  async function saveAttendance(showAlert = true) {
-    if (locked) return;
+  async function saveAttendance(showAlert = true): Promise<boolean> {
+    if (locked) return false;
     setSaving(true);
     setError('');
 
-    const rows = players.map((p: Player) => {
-      const draft = drafts[p.id] || { status: 'present', notes: '' };
+    const pending = attendancePlayers.filter(p=>!drafts[p.id]?.status);
+    if(pending.length){setError('Selecciona la situación de todos los jugadores antes de guardar: '+pending.map(p=>p.display_name).join(', '));setSaving(false);return false;}
+    const rows = attendancePlayers.map((p: Player) => {
+      const draft = drafts[p.id];
       const needsNotes = attendanceNeedsExplanation.includes(draft.status);
       return {
         session_id: session.id,
@@ -91,43 +110,25 @@ export function AttendancePage({
     if (error) {
       setError(error.message);
       setSaving(false);
-      return;
+      return false;
     }
 
     const refreshed = await supabase.from('attendance').select('*').eq('session_id', session.id);
     setLocalAttendance(refreshed.data || []);
 
-    await syncEvaluationsWithAttendance(rows);
     await reload(session.id);
 
     setSaving(false);
-    if (showAlert) alert('Asistencia guardada.');
-  }
-
-  async function syncEvaluationsWithAttendance(rows: any[]) {
-    for (const row of rows) {
-      if (absentStatuses.includes(row.status)) {
-        await supabase
-          .from('evaluations')
-          .delete()
-          .eq('session_id', session.id)
-          .eq('player_id', row.player_id);
-      } else {
-        await supabase
-          .from('evaluations')
-          .upsert(
-            { session_id: session.id, player_id: row.player_id },
-            { onConflict: 'session_id,player_id' }
-          );
-      }
-    }
+    if (showAlert) setSavedNotice('Asistencia guardada correctamente.');
+    return true;
   }
 
   async function confirmAttendance() {
     const confirmed = window.confirm('¿Confirmar asistencia? Se guardará y el coach no podrá modificarla después.');
     if (!confirmed) return;
 
-    await saveAttendance(false);
+    const saved = await saveAttendance(false);
+    if (!saved) return;
 
     const { error } = await supabase
       .from('sessions')
@@ -168,7 +169,7 @@ export function AttendancePage({
     setDrafts(prev => ({
       ...prev,
       [playerId]: {
-        status: prev[playerId]?.status || 'present',
+        status: prev[playerId]?.status ?? 'present',
         notes: prev[playerId]?.notes || '',
         ...update,
       },
@@ -213,9 +214,11 @@ export function AttendancePage({
         )}
       </Card>
 
-      {players.map((p: Player) => {
+      {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
+      <Card><p className="muted">Indica la situación de TODOS los jugadores, también de los no convocados. Por comodidad, los jugadores sin registro previo aparecen como presentes. Revisa y cambia las ausencias y los lesionados ANTES de guardar, especialmente los no convocados. Solo se evaluará a los convocados que realmente entrenaron. Los comentarios de asistencia explican las ausencias.</p></Card>
+      {attendancePlayers.map((p: Player) => {
         const draft = drafts[p.id] || {
-          status: localAttendance.find((a: Attendance) => a.player_id === p.id)?.status || 'present',
+          status: localAttendance.find((a: Attendance) => a.player_id === p.id)?.status ?? 'present',
           notes: localAttendance.find((a: Attendance) => a.player_id === p.id)?.notes || '',
         };
         const needs = attendanceNeedsExplanation.includes(draft.status);
@@ -224,7 +227,7 @@ export function AttendancePage({
         return (
           <Card key={p.id} className={missingNote ? 'needs-note' : ''}>
             <div className="row">
-              <strong>{p.display_name}</strong>
+              <strong>{p.display_name} <small className="muted">{calledIds.has(p.id)?'· Convocado':'· No convocado'}</small></strong>
               <span>{translatePosition(p.position)}</span>
             </div>
 
@@ -241,6 +244,7 @@ export function AttendancePage({
             )}
 
             <div className="chips">
+              <button disabled className={draft.status?'chip':'chip active'}>{draft.status?'':'Sin registrar'}</button>
               {attendanceOptions.map(([value, label]) => (
                 <button
                   disabled={locked}

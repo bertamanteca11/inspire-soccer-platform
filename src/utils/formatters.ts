@@ -31,7 +31,7 @@ export function translateInjuryStatus(status?: string | null) {
 }
 
 export function translateAttendance(status?: string | null) {
-  const map: Record<string, string> = { present:'Presente', late:'Tarde', justified_late:'Tarde justificado', justified_absence:'Ausencia justificada', unjustified_absence:'Ausencia injustificada', injured:'Lesionado' };
+  const map: Record<string, string> = { present:'Presente', late:'Tarde', justified_late:'Tarde justificado', justified_absence:'Ausencia justificada', unjustified_absence:'Ausencia injustificada', injured:'Lesionado', injured_present:'Lesionado presente (fisio)', injured_justified_absence:'Lesionado ausente justificado', injured_unjustified_absence:'Lesionado ausente no justificado' };
   return status ? map[status] || status : '';
 }
 
