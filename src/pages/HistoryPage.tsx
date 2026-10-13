@@ -1,3 +1,4 @@
+import { evaluationTotal } from '../utils/evaluationScores';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
@@ -61,7 +62,7 @@ export function HistoryPage() {
         name: playerName,
         callup: c ? translateCallup(c.status) : 'No convocado',
         attendance: a ? translateAttendance(a.status) : '-',
-        total_score: e?.total_score || '-',
+        total_score: evaluationTotal(e) ?? 'N/A',
         evaluated: e?.evaluated ? 'Sí' : 'No',
         tactical_discipline: e?.tactical_discipline ?? '-',
         effort_commitment: e?.effort_commitment ?? '-',
@@ -74,8 +75,8 @@ export function HistoryPage() {
   }, [callups, attendance, evaluations]);
 
   const topPlayers = [...evaluations]
-    .filter(e => e.total_score)
-    .sort((a, b) => Number(b.total_score) - Number(a.total_score))
+    .filter(e => evaluationTotal(e)!==null)
+    .sort((a, b) => Number(evaluationTotal(b)) - Number(evaluationTotal(a)))
     .slice(0, 3);
 
   return (
@@ -107,7 +108,7 @@ export function HistoryPage() {
           <div className="history-grid">
             <Card><p className="kicker">Convocados</p><h2>{callups.length}</h2></Card>
             <Card><p className="kicker">Asistencias</p><h2>{attendance.length}</h2></Card>
-            <Card><p className="kicker">Evaluaciones</p><h2>{evaluations.filter(e => e.evaluated).length}</h2></Card>
+            <Card><p className="kicker">Evaluaciones</p><h2>{evaluations.filter(e => e.evaluated && !e.not_applicable).length}</h2></Card>
           </div>
 
           <Card>
@@ -117,7 +118,7 @@ export function HistoryPage() {
               <div className="top-row" key={e.id}>
                 <span className="rank">#{i + 1}</span>
                 <strong>{e.players?.display_name || 'Jugador'}</strong>
-                <span>{e.total_score}</span>
+                <span>{evaluationTotal(e) ?? "N/A"}</span>
               </div>
             ))}
           </Card>

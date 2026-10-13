@@ -1,3 +1,4 @@
+import { fieldScore } from '../utils/evaluationScores';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
@@ -18,7 +19,7 @@ export function IntelligencePage(){
  const ps=(p.data||[]) as P[];setPlayers(ps);setNotes(n.data||[]);const ids=(ss.data||[]).map(x=>x.id);if(!ids.length){setRank([]);setConcerns([]);return}
  const [ev,at,st]=await Promise.all([supabase.from('evaluations').select('*').in('session_id',ids),supabase.from('attendance').select('*').in('session_id',ids),supabase.from('session_standouts').select('*').in('session_id',ids)]);
  const m=new Map<string,Item>();const get=(id:string)=>{if(!m.has(id))m.set(id,{player_id:id,score:0,reasons:[]});return m.get(id)!};
- for(const e of ev.data||[]){if(!e.evaluated)continue;const x=get(e.player_id);const vals=['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'].map(k=>Number(e[k])).filter(Number.isFinite);if(vals.length)x.score+=vals.reduce((a,b)=>a+b,0)/vals.length;for(const k of ['tactical_discipline','decision_making','mentality_attitude'])if(Number(e[k])<=2)x.reasons.push(k.replace(/_/g, ' ')+': '+e[k]);}
+ for(const e of ev.data||[]){if(!e.evaluated || e.not_applicable)continue;const x=get(e.player_id);const vals=['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'].map(k=>fieldScore(e,k)).filter((n):n is number=>n!==null);if(vals.length)x.score+=vals.reduce((a,b)=>a+b,0)/vals.length;for(const k of ['tactical_discipline','decision_making','mentality_attitude'])if(fieldScore(e,k)!==null && Number(e[k])<=2)x.reasons.push(k.replace(/_/g, ' ')+': '+e[k]);}
  for(const a of at.data||[]){const x=get(a.player_id);if(a.status==='unjustified_absence'){x.score-=2;x.reasons.push('Ausencia injustificada')}else if(a.status==='late'){x.score-=1;x.reasons.push('Llegada tarde')}else if(a.status==='justified_absence'||a.status==='justified_late'){x.reasons.push('Justificada: '+a.status.replace(/_/g,' '))}}
  for(const t of st.data||[]){const x=get(t.player_id);x.score+=t.category==='top'?2:-1;x.reasons.push(t.category==='top'?'Destacado positivo de la sesión':'Necesita seguimiento en la sesión')}
  const all=[...m.values()];setRank([...all].sort((a,b)=>b.score-a.score));setConcerns(all.filter(x=>x.reasons.some(r=>r.includes('Ausencia injustificada')||r.includes('Llegada tarde')||r.includes(': 1')||r.includes(': 2'))).sort((a,b)=>a.score-b.score));}

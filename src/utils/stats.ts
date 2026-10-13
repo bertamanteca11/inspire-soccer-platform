@@ -1,12 +1,13 @@
 import type { Evaluation } from '../types';
+import { fieldScore } from './evaluationScores';
 import type { PlayerCardTotal } from './appTypes';
 import { ratingFields } from './appTypes';
 
 export function getRatingCounts(evaluations: Evaluation[]) {
   const result: { high: Record<string, number>; low: Record<string, number> } = { high: {}, low: {} };
   ratingFields.forEach(([field]) => {
-    result.high[field] = evaluations.filter((e: any) => Number(e[field]) >= 4).length;
-    result.low[field] = evaluations.filter((e: any) => Number(e[field]) > 0 && Number(e[field]) <= 2).length;
+    result.high[field] = evaluations.filter((e: any) => fieldScore(e,field) !== null && Number(e[field]) >= 4).length;
+    result.low[field] = evaluations.filter((e: any) => fieldScore(e,field) !== null && Number(e[field]) > 0 && Number(e[field]) <= 2).length;
   });
   return result;
 }

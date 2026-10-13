@@ -5,6 +5,7 @@ import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
 import { translatePosition } from '../utils/formatters';
 import { getRatingCounts } from '../utils/stats';
+import { isFieldNA, evaluationTotal } from '../utils/evaluationScores';
 import { Card } from '../components/ui';
 
 const matchRatingFields = [
@@ -71,10 +72,11 @@ export function EvaluationPage({
   const [mode, setMode] = useState<'category' | 'player'>('category');
   const [categoryIndex, setCategoryIndex] = useState(0);
   const [comments, setComments] = useState<Record<string,string>>({});
+  const [dirtyComments, setDirtyComments] = useState<Record<string,boolean>>({});
   const [savedNotice, setSavedNotice] = useState('');
-  const [cardType, setCardType] = useState('none');
-  const [cardReason, setCardReason] = useState('');
-  const [suspensionMatches, setSuspensionMatches] = useState('1');
+  const [savedCards, setSavedCards] = useState<any[]>([]);
+  const [savingCard, setSavingCard] = useState(false);
+  const [cardDrafts, setCardDrafts] = useState<Record<string, {type:string;reason:string;matches:string}>>({});
   const [localEvaluations, setLocalEvaluations] = useState<Evaluation[]>(evaluations || []);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [localLocked, setLocalLocked] = useState(!!session.evaluation_confirmed);
@@ -82,9 +84,17 @@ export function EvaluationPage({
   const locked = localLocked;
   const isAdmin = role === 'admin';
 
-  useEffect(() => { setLocalEvaluations(evaluations || []); setComments(Object.fromEntries((evaluations || []).map(e => [e.player_id, e.comment || '']))); }, [evaluations]);
+  useEffect(() => { setLocalEvaluations(evaluations || []); }, [evaluations, session.id]);
+  useEffect(() => { setComments({}); setDirtyComments({}); setCardDrafts({}); }, [session.id]);
+  useEffect(() => { setComments(prev => { const next = {...prev}; for (const e of evaluations || []) if (!dirtyComments[e.player_id]) next[e.player_id] = e.comment || ''; return next; }); }, [evaluations, dirtyComments]);
+  useEffect(() => { void loadCards(); }, [session.id]);
   useEffect(() => setLocalLocked(!!session.evaluation_confirmed), [session.evaluation_confirmed]);
   useEffect(() => { loadAttendance(); }, [session.id]);
+
+  async function loadCards() {
+    const { data, error } = await supabase.from('cards').select('*').eq('session_id', session.id);
+    if (error) setError(error.message); else setSavedCards(data || []);
+  }
 
   async function loadAttendance() {
     const { data } = await supabase.from('attendance').select('*').eq('session_id', session.id);
@@ -100,6 +110,14 @@ export function EvaluationPage({
 
   const player = evaluablePlayers[index] || evaluablePlayers[0];
   const ev = localEvaluations.find((e: Evaluation) => e.player_id === player?.id);
+  const existingPlayerCard = savedCards.find(c => c.player_id === player?.id);
+  const cardDraft = cardDrafts[player?.id] || {type:existingPlayerCard?.type || 'none', reason:existingPlayerCard?.reason || '', matches:'1'};
+  const cardType = cardDraft.type;
+  const cardReason = cardDraft.reason;
+  const suspensionMatches = cardDraft.matches;
+  function setCardDraft(playerId: string, patch: Partial<{type:string;reason:string;matches:string}>) {
+    setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || {type:'none',reason:'',matches:'1'}), ...patch}}));
+  }
   const counters = useMemo(() => getRatingCounts(localEvaluations), [localEvaluations]);
 
   useEffect(() => {
@@ -157,9 +175,15 @@ export function EvaluationPage({
     const record = await ensureEval(target);
     if (!record) return false;
 
+    // Selecting a numeric score reverses N/A before final confirmation.
+    // Both values are saved in one request so they cannot become inconsistent.
+    const previous = localEvaluations.find(e => e.player_id === target.id) as any;
+    const patch = ALL_SCORE_FIELDS.includes(field as any)
+      ? { [field]: value, na_fields: {...(previous?.na_fields || {}), [field]: false}, submitted_at: new Date().toISOString() }
+      : { [field]: value, submitted_at: new Date().toISOString() };
     const { data, error } = await supabase
       .from('evaluations')
-      .update({ [field]: value, submitted_at: new Date().toISOString() })
+      .update(patch)
       .eq('id', record.id)
       .select('*')
       .single();
@@ -167,56 +191,103 @@ export function EvaluationPage({
     if (error) { setError(cleanDbError(error.message)); return false; }
 
     setLocalEvaluations(prev => [...prev.filter(e => e.id !== data.id), data as Evaluation]);
+    if (field === 'comment') { setComments(prev => ({ ...prev, [target.id]: String(value) })); setDirtyComments(prev => ({...prev, [target.id]: false})); }
     setSavedNotice('Cambios guardados correctamente');
     return true;
   }
 
-  async function saveCardIfNeeded() {
-    if (locked || cardType === 'none') return true;
+  async function setQualityNA(field: string, target: Player = player) {
+    if (locked) return false;
+    setError('');
+    const record = await ensureEval(target);
+    if (!record) return false;
+    const flags = {...((record as any).na_fields || {})};
+    flags[field] = !isFieldNA(record, field);
+    const {data, error} = await supabase.from('evaluations')
+      .update({na_fields:flags, submitted_at:new Date().toISOString()})
+      .eq('id',record.id).select('*').single();
+    if (error) {setError(cleanDbError(error.message)); return false;}
+    setLocalEvaluations(prev => [...prev.filter(e => e.id !== data.id), data as Evaluation]);
+    setSavedNotice('Cambios guardados correctamente');
+    return true;
+  }
 
-    if (cardType !== 'yellow' && !cardReason.trim()) {
+  // A player has one editable card selection per match. Re-entering the
+  // player must NEVER insert another card for the same selection.
+  async function saveCardIfNeeded(target: Player = player) {
+    const draft = cardDrafts[target.id];
+    if (!draft) return true; // No changes to the saved selection.
+    if (locked || savingCard) return false;
+    const existing = savedCards.filter(c => c.player_id === target.id);
+    if (existing.length > 1) {
+      setError(`Hay ${existing.length} tarjetas registradas para ${target.display_name}. Revísalas antes de modificar el desplegable para evitar alterar tarjetas históricas.`);
+      return false;
+    }
+    const old = existing[0];
+    if (draft.type === (old?.type || 'none') && (draft.reason || '') === (old?.reason || '')) {
+      setCardDrafts(prev => { const next = {...prev}; delete next[target.id]; return next; });
+      return true;
+    }
+    if (draft.type !== 'none' && draft.type !== 'yellow' && !draft.reason.trim()) {
       setError('Si marcas una roja o doble amarilla debes añadir el motivo.');
       return false;
     }
-
-    const { error } = await supabase.from('cards').insert({
-      session_id: session.id,
-      player_id: player.id,
-      type: cardType,
-      reason: cardReason || null,
-    });
-
-    if (error) {
-      setError(error.message);
+    // Changing a red card can affect a separate suspension record; avoid
+    // silently leaving inconsistent disciplinary data.
+    if (old && ['straight_red','double_yellow'].includes(old.type) && draft.type !== old.type) {
+      setError('Esta tarjeta roja ya tiene un registro. Para cambiarla, revisa también su sanción antes de editarla.');
       return false;
     }
-
-    if (cardType === 'straight_red' || cardType === 'double_yellow') {
-      const matches = Math.max(1, Number(suspensionMatches) || 1);
-      const source = cardType === 'straight_red' ? 'straight_red' : 'double_yellow';
-
-      const suspension = await supabase.from('suspensions').insert({
-        player_id: player.id,
-        source,
-        matches_total: matches,
-        matches_served: 0,
-        status: 'active',
-        reason: cardReason || `Sanción por ${cardType}`,
-        created_from_session_id: session.id,
-      });
-
-      if (suspension.error) {
-        setError(suspension.error.message);
-        return false;
+    setSavingCard(true);
+    setError('');
+    try {
+      let error: any = null;
+      if (draft.type === 'none') {
+        if (old) ({ error } = await supabase.from('cards').delete().eq('id', old.id));
+      } else if (old) {
+        ({ error } = await supabase.from('cards').update({type:draft.type, reason:draft.reason || null}).eq('id', old.id));
+      } else {
+        ({ error } = await supabase.from('cards').insert({session_id:session.id, player_id:target.id, type:draft.type, reason:draft.reason || null}));
       }
+      if (error) { setError(error.message); return false; }
+      // Refresh before clearing the draft so the select keeps the saved value.
+      const { data, error: readError } = await supabase.from('cards').select('*').eq('session_id', session.id);
+      if (readError) { setError(readError.message); return false; }
+      setSavedCards(data || []);
+      setCardDrafts(prev => { const next = {...prev}; delete next[target.id]; return next; });
+      if (!old && ['straight_red','double_yellow'].includes(draft.type)) {
+        const { error: suspensionError } = await supabase.from('suspensions').insert({
+          player_id:target.id,
+          source:draft.type === 'straight_red' ? 'straight_red' : 'double_yellow',
+          matches_total:Math.max(1, Number(draft.matches) || 1),
+          matches_served:0,
+          status:'active',
+          reason:draft.reason || `Sanción por ${draft.type}`,
+          created_from_session_id:session.id,
+        });
+        if (suspensionError) { setError('Tarjeta guardada, pero no se pudo crear la sanción: ' + suspensionError.message); return false; }
+      }
+      if (draft.type === 'yellow' && !old) {
+        const accumulation = await supabase.rpc('create_yellow_accumulation_suspensions');
+        if (accumulation.error) setError('Tarjeta guardada, pero revisa la acumulación: ' + accumulation.error.message);
+      }
+      setSavedNotice('Tarjeta guardada para ' + target.display_name);
+      return true;
+    } finally {
+      setSavingCard(false);
     }
+  }
 
-    await supabase.rpc('create_yellow_accumulation_suspensions');
+  async function previous() {
+    if ((comments[player.id] ?? '') !== (ev?.comment ?? '') && !await update('comment', comments[player.id] ?? '', player)) return;
+    if (!await saveCardIfNeeded(player)) return;
+    setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length);
+  }
 
-    setCardType('none');
-    setCardReason('');
-    setSuspensionMatches('1');
-    return true;
+  async function goToPlayer(nextIndex: number) {
+    if ((comments[player.id] ?? '') !== (ev?.comment ?? '') && !await update('comment', comments[player.id] ?? '', player)) return;
+    if (!await saveCardIfNeeded(player)) return;
+    setIndex(nextIndex);
   }
 
   async function next() {
@@ -224,11 +295,9 @@ export function EvaluationPage({
       const okComment = await update('comment', comments[player.id] ?? '', player);
       if (!okComment) return;
     }
-    const okCard = await saveCardIfNeeded();
-    if (!okCard) return;
+    if (!await saveCardIfNeeded(player)) return;
 
-    const saved = await update('evaluated', true);
-    if (!saved) return;
+    // Navigation must never finalize an evaluation; only Confirm does that.
     setIndex(current => (current + 1) % evaluablePlayers.length);
   }
 
@@ -236,6 +305,10 @@ export function EvaluationPage({
     const confirmed = window.confirm('¿Confirmar evaluación? El coach no podrá modificarla después.');
     if (!confirmed) return;
 
+    for (const target of evaluablePlayers) if (!await saveCardIfNeeded(target)) return;
+    if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) {
+      if (!await update('comment', comments[player.id] ?? '', player)) return;
+    }
     // Persist the displayed default 3 for every eligible player before locking.
     // Never overwrite existing scores (including values 1, 2, 4 or 5).
     setError('');
@@ -244,6 +317,13 @@ export function EvaluationPage({
     const existingByPlayer = new Map((latest || []).map((record: any) => [record.player_id, record]));
     for (const target of evaluablePlayers) {
       const existing = existingByPlayer.get(target.id) as any;
+      if (existing?.not_applicable) {
+        if (!existing.evaluated) {
+          const { error } = await supabase.from('evaluations').update({evaluated:true}).eq('id',existing.id);
+          if (error) { setError(error.message); return; }
+        }
+        continue;
+      }
       const defaults: Record<string, number> = {};
       for (const field of ALL_SCORE_FIELDS) {
         if (existing?.[field] == null) defaults[field] = DEFAULT_SCORE;
@@ -316,14 +396,14 @@ export function EvaluationPage({
       <Card><div className="row"><strong>Orden de evaluación</strong><select aria-label="Orden de evaluación" value={mode} onChange={e => setMode(e.target.value as 'category'|'player')}><option value="category">Por cualidad (todos los jugadores)</option><option value="player">Por jugador (todas las cualidades)</option></select></div></Card>
       {mode === 'category' ? <>
         <Card><strong>Cualidad que estás evaluando</strong><select value={categoryIndex} onChange={e => setCategoryIndex(Number(e.target.value))}>{(session.type === 'training' ? trainingRatingFields : matchRatingFields).map(([field,label],i) => <option key={field} value={i}>{label}</option>)}</select></Card>
-        {(session.type === 'training' ? trainingRatingFields : matchRatingFields).slice(categoryIndex,categoryIndex+1).map(([field,label]) => <Card key={field}><h2>{label}</h2><p className="muted">Valora esta cualidad en todos los jugadores antes de pasar a la siguiente.</p>{evaluablePlayers.map(p => {const rating = localEvaluations.find(e => e.player_id === p.id); return <div key={p.id} className="rating-player-row"><strong>{p.display_name}</strong><div className="rating">{[1,2,3,4,5].map(n => <button key={n} disabled={locked} className={((rating as any)?.[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field,n,p)}>{n}</button>)}</div></div>})}</Card>)}
+        {(session.type === 'training' ? trainingRatingFields : matchRatingFields).slice(categoryIndex,categoryIndex+1).map(([field,label]) => <Card key={field}><h2>{label}</h2><p className="muted">Valora esta cualidad en todos los jugadores antes de pasar a la siguiente.</p>{evaluablePlayers.map(p => {const rating = localEvaluations.find(e => e.player_id === p.id); const na=isFieldNA(rating, field); return <div key={p.id} className="rating-player-row"><strong>{p.display_name}</strong><div className="rating">{[1,2,3,4,5].map(n => <button key={n} disabled={locked} className={!na && ((rating as any)?.[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field,n,p)}>{n}</button>)}<button disabled={locked} className={na ? 'rate active' : 'rate'} onClick={() => setQualityNA(field,p)}>N/A</button></div></div>})}</Card>)}
         <div className="row"><button className="secondary" disabled={categoryIndex===0} onClick={()=>setCategoryIndex(i=>i-1)}>Cualidad anterior</button><button className="primary" onClick={()=>{if(categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1)setCategoryIndex(i=>i+1);else setMode('player')}}>{categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1 ? 'Siguiente cualidad' : 'Revisar comentarios'}</button></div>
       </> : <>
       <div className="progress">{index + 1} / {evaluablePlayers.length}</div>
 
       <Card>
         <div className="search-label"><Search size={16} /> Ir a jugador</div>
-        <select value={index} onChange={e => setIndex(Number(e.target.value))}>
+        <select value={index} onChange={e => void goToPlayer(Number(e.target.value))}>
           {evaluablePlayers.map((p: Player, i: number) => <option key={p.id} value={i}>{i + 1}. {p.display_name}</option>)}
         </select>
       </Card>
@@ -331,9 +411,9 @@ export function EvaluationPage({
       <Card>
         <div className="row">
           <div><p className="kicker">Jugador</p><h2>{player.display_name}</h2><p>{translatePosition(player.position)}</p></div>
-          <div className="score-badge">{current.total_score || '-'}</div>
+          <div className="score-badge">{evaluationTotal(current) ?? 'N/A'}</div>
         </div>
-        <div className="row" style={{marginTop:12}}><button className="secondary" disabled={locked} onClick={()=>setIndex(i=>(i-1+evaluablePlayers.length)%evaluablePlayers.length)}>← Anterior</button><button className="primary" disabled={locked} onClick={next}>Siguiente jugador →</button></div>
+        <div className="row" style={{marginTop:12}}><button className="secondary" disabled={locked} onClick={previous}>← Anterior</button><button className="primary" disabled={locked} onClick={next}>Siguiente jugador →</button></div>
       </Card>
 
       {activeRatingFields.map(([field, label, description]) => (
@@ -354,8 +434,9 @@ export function EvaluationPage({
           </div>
           <div className="rating">
             {[1, 2, 3, 4, 5].map(n => (
-              <button disabled={locked} key={n} className={(current[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
+              <button disabled={locked} key={n} className={!isFieldNA(current,field) && (current[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
             ))}
+            <button disabled={locked} className={isFieldNA(current,field) ? 'rate active' : 'rate'} onClick={() => setQualityNA(field)}>N/A</button>
           </div>
         </Card>
       ))}
@@ -363,13 +444,14 @@ export function EvaluationPage({
       {isMatch && (
         <Card>
           <strong>Tarjetas</strong>
-          <select disabled={locked} value={cardType} onChange={e => setCardType(e.target.value)}>
+          <select disabled={locked || savingCard} value={cardType} onChange={e => setCardDraft(player.id, {type:e.target.value})}>
             {cardOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
 
+          <p className="muted">Tarjeta registrada para {player.display_name}: {savedCards.filter(c=>c.player_id===player.id).map(c=>c.type==='yellow'?'🟨 Amarilla':'🟥 '+(c.type==='double_yellow'?'Doble amarilla':'Roja')).join(' · ') || 'Ninguna'}</p>
           {cardType !== 'none' && (
             <>
-              <textarea disabled={locked} placeholder="Motivo de la tarjeta..." value={cardReason} onChange={e => setCardReason(e.target.value)} />
+              <textarea disabled={locked} placeholder="Motivo de la tarjeta..." value={cardReason} onChange={e => setCardDraft(player.id, {reason:e.target.value})} />
               {(cardType === 'straight_red' || cardType === 'double_yellow') && (
                 <input
                   disabled={locked}
@@ -377,22 +459,25 @@ export function EvaluationPage({
                   min="1"
                   placeholder="Partidos de sanción"
                   value={suspensionMatches}
-                  onChange={e => setSuspensionMatches(e.target.value)}
+                  onChange={e => setCardDraft(player.id, {matches:e.target.value})}
                 />
               )}
             </>
           )}
+          <p className="muted">{savingCard ? 'Guardando tarjeta…' : cardType === 'none' ? 'Selección guardada.' : 'La selección se guardará al pasar a otro jugador o confirmar la evaluación.'}</p>
         </Card>
       )}
 
       <Card key={'comment-'+player.id}>
         <strong>Comentario de {player.display_name}</strong>
-        <textarea disabled={locked} value={comments[player.id] ?? current.comment ?? ''} onChange={e => setComments(prev => ({...prev,[player.id]:e.target.value}))} onBlur={e => {if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) void update('comment',comments[player.id] ?? '',player)}} placeholder="Comentario individual..." />
+        <textarea disabled={locked} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true}));}} placeholder="Comentario individual..." />
         <button className="secondary" disabled={locked} onClick={()=>void update('comment',comments[player.id] ?? '',player)}>Guardar comentario</button>
       </Card>
 
-      <button className="primary" onClick={next} disabled={locked}>Siguiente jugador <ChevronRight size={18} /></button>
-      <button className="secondary" disabled={locked} onClick={() => setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length)}>Anterior</button>
+      <div className="row" style={{justifyContent:'space-between', gap:12}}>
+        <button className="secondary" disabled={locked} onClick={previous}>← Jugador anterior</button>
+        <button className="primary" disabled={locked} onClick={next}>Siguiente jugador <ChevronRight size={18} /></button>
+      </div>
       </>}
     </div>
   );

@@ -1,3 +1,4 @@
+import { evaluationTotal } from '../utils/evaluationScores';
 import { AlertTriangle, Trophy, Ban, ClipboardList, Shield, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
@@ -53,11 +54,11 @@ export function HomePage({
   async function loadGlobalTops() {
     const { data } = await supabase
       .from('evaluations')
-      .select('player_id,total_score,sessions(type),players(display_name)')
+      .select('player_id,total_score,not_applicable,na_fields,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,sessions(type),players(display_name)')
       .eq('evaluated', true)
       .not('total_score', 'is', null);
 
-    const rows = data || [];
+    const rows = (data || []).filter((r:any)=>evaluationTotal(r)!==null);
     const matchRows = rows.filter((r: any) =>
       ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(r.sessions?.type)
     );
@@ -189,7 +190,7 @@ function buildTopRanking(rows: any[]) {
         scores: [],
       };
     }
-    grouped[row.player_id].scores.push(Number(row.total_score));
+    grouped[row.player_id].scores.push(Number(evaluationTotal(row)));
   });
 
   return Object.entries(grouped)
