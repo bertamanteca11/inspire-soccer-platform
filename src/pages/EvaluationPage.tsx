@@ -380,7 +380,7 @@ export function EvaluationPage({
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
         <p className="kicker">Evaluación</p>
         <h2>{session.name}</h2>
-        <p className="muted">La puntuación 3 se aplica por defecto a las cualidades sin evaluar y se guarda al confirmar. Solo aparecen jugadores convocados con asistencia registrada como presente o tarde. Los lesionados presentes no se evalúan.</p>
+        <p className="muted"></p>
 
         {locked ? (
           <div className="stack">

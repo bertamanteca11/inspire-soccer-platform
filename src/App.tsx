@@ -97,17 +97,53 @@ function Platform({ role }: { role: Role }) {
       return;
     }
 
-    const callups = await supabase
-      .from('callups')
-      .select('player_id, evaluable, status, players(*)')
-      .eq('session_id', workingSession.id)
-      .neq('status', 'not_called')
-      .order('created_at');
+const [callups, att] = await Promise.all([
+  supabase
+    .from('callups')
+    .select('player_id, evaluable, status, players(*)')
+    .eq('session_id', workingSession.id)
+    .neq('status', 'not_called')
+    .order('created_at'),
 
-    setPlayers(((callups.data || []) as any[]).map(row => row.players).filter(Boolean));
+  supabase
+    .from('attendance')
+    .select('*')
+    .eq('session_id', workingSession.id)
+]);
 
-    const att = await supabase.from('attendance').select('*').eq('session_id', workingSession.id);
-    setAttendance(att.data || []);
+if (callups.error) {
+  setError(`Error cargando convocatoria: ${callups.error.message}`);
+}
+
+if (att.error) {
+  setError(`Error cargando asistencia: ${att.error.message}`);
+}
+
+const attendanceRows = (att.data || []) as Attendance[];
+setAttendance(attendanceRows);
+
+// IDs de jugadores convocados o con asistencia registrada.
+const playerIds = [
+  ...new Set([
+    ...(callups.data || []).map(row => row.player_id),
+    ...attendanceRows.map(row => row.player_id)
+  ])
+];
+
+if (playerIds.length > 0) {
+  const { data: sessionPlayers, error: playersError } = await supabase
+    .from('players')
+    .select('*')
+    .in('id', playerIds);
+
+  if (playersError) {
+    setError(`Error cargando jugadores: ${playersError.message}`);
+  }
+
+  setPlayers((sessionPlayers || []) as Player[]);
+} else {
+  setPlayers([]);
+}
 
     const ev = await supabase.from('evaluations').select('*').eq('session_id', workingSession.id);
     setEvaluations(ev.data || []);
