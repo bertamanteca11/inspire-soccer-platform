@@ -80,16 +80,56 @@ export function EvaluationPage({
   const [localEvaluations, setLocalEvaluations] = useState<Evaluation[]>(evaluations || []);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [localLocked, setLocalLocked] = useState(!!session.evaluation_confirmed);
+  const [adminRecordsMode, setAdminRecordsMode] = useState(false);
+  const [roster, setRoster] = useState<Player[]>([]);
+  const [recordIndex, setRecordIndex] = useState(0);
+  const [recordSaving, setRecordSaving] = useState(false);
 
   const locked = localLocked;
+  const recordsOnlyCompleted = Boolean((session as AppSession & { records_only_confirmed?: boolean }).records_only_confirmed);
   const isAdmin = role === 'admin';
 
   useEffect(() => { setLocalEvaluations(evaluations || []); }, [evaluations, session.id]);
   useEffect(() => { setComments({}); setDirtyComments({}); setCardDrafts({}); }, [session.id]);
-  useEffect(() => { setComments(prev => { const next = {...prev}; for (const e of evaluations || []) if (!dirtyComments[e.player_id]) next[e.player_id] = e.comment || ''; return next; }); }, [evaluations, dirtyComments]);
+  // Initialize comments without overwriting edits or recently saved text with stale props.
+  useEffect(() => {
+    setComments(prev => {
+      const next = { ...prev };
+      for (const e of localEvaluations) {
+        if (!(e.player_id in next)) next[e.player_id] = e.comment || '';
+      }
+      return next;
+    });
+  }, [localEvaluations]);
   useEffect(() => { void loadCards(); }, [session.id]);
   useEffect(() => setLocalLocked(!!session.evaluation_confirmed), [session.evaluation_confirmed]);
   useEffect(() => { loadAttendance(); }, [session.id]);
+  useEffect(() => { setAdminRecordsMode(false); setRecordIndex(0); }, [session.id]);
+  useEffect(() => {
+    if (!isAdmin || !adminRecordsMode) return;
+    let cancelled = false;
+    supabase.from('players').select('*').order('display_name').then(({data,error}) => {
+      if (cancelled) return;
+      if (error) setError(error.message);
+      else setRoster((data || []) as Player[]);
+    });
+    return () => { cancelled = true; };
+  }, [isAdmin, adminRecordsMode, session.id]);
+
+  useEffect(() => {
+    if (!isAdmin || !adminRecordsMode) return;
+    let cancelled = false;
+    supabase.from('evaluations').select('*').eq('session_id',session.id).then(({data,error}) => {
+      if (cancelled) return;
+      if (error) { setError(error.message); return; }
+      setLocalEvaluations(prev => {
+        const byId = new Map(prev.map(e => [e.player_id,e]));
+        for (const row of (data || []) as Evaluation[]) byId.set(row.player_id,row);
+        return [...byId.values()];
+      });
+    });
+    return () => { cancelled = true; };
+  }, [isAdmin,adminRecordsMode,session.id]);
 
   async function loadCards() {
     const { data, error } = await supabase.from('cards').select('*').eq('session_id', session.id);
@@ -119,6 +159,10 @@ export function EvaluationPage({
     setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || {type:'none',reason:'',matches:'1'}), ...patch}}));
   }
   const counters = useMemo(() => getRatingCounts(localEvaluations), [localEvaluations]);
+  const recordPlayers = roster;
+  const recordPlayer = recordPlayers[recordIndex];
+  const recordCard = savedCards.find(c => c.player_id === recordPlayer?.id);
+  const recordDraft = recordPlayer ? (cardDrafts[recordPlayer.id] || {type:recordCard?.type || 'none',reason:recordCard?.reason || '',matches:'1'}) : null;
 
   useEffect(() => {
     if (index >= evaluablePlayers.length) setIndex(0);
@@ -126,7 +170,7 @@ export function EvaluationPage({
 
   if (!session.callup_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la convocatoria.</p></Card></div>;
   if (!session.attendance_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la asistencia. Así los ausentes quedan fuera de evaluación y no cuentan en las medias.</p></Card></div>;
-  if (evaluablePlayers.length === 0) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>Los jugadores ausentes no aparecen en evaluación ni cuentan en las medias.</p></Card></div>;
+  if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>Los jugadores ausentes no aparecen en evaluación ni cuentan en las medias.</p></Card></div>;
 
   async function ensureEval(target: Player = player): Promise<Evaluation | null> {
     const existing = localEvaluations.find(e => e.player_id === target.id);
@@ -134,7 +178,7 @@ export function EvaluationPage({
 
     const { data, error } = await supabase
       .from('evaluations')
-      .insert({ session_id: session.id, player_id: target.id })
+      .insert({ session_id: session.id, player_id: target.id, ...(adminRecordsMode ? {not_applicable:true} : {}) })
       .select('*')
       .single();
 
@@ -278,37 +322,110 @@ export function EvaluationPage({
     }
   }
 
+  // Save drafts on navigation without finalizing the session evaluation.
+  async function saveComment(target: Player) {
+    if (locked) return false;
+    const text = comments[target.id] ?? '';
+    const existing = localEvaluations.find(e => e.player_id === target.id);
+    if (text === (existing?.comment ?? '')) return true;
+
+    setError('');
+    const record = await ensureEval(target);
+    if (!record) return false;
+
+    const { data, error } = await supabase
+      .from('evaluations')
+      .update({ comment: text, submitted_at: new Date().toISOString() })
+      .eq('id', record.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      setError('No se pudo guardar el comentario: ' + cleanDbError(error.message));
+      return false;
+    }
+
+    setLocalEvaluations(prev => [...prev.filter(e => e.id !== data.id), data as Evaluation]);
+    setDirtyComments(prev => ({ ...prev, [target.id]: false }));
+    setSavedNotice('Comentario guardado correctamente');
+    return true;
+  }
+
+  async function saveRecordAndNavigate(nextIndex?: number) {
+    if (!recordPlayer || recordSaving) return;
+    setRecordSaving(true);
+    try {
+      if (!await saveComment(recordPlayer)) return;
+      if (!await saveCardIfNeeded(recordPlayer)) return;
+      if (nextIndex !== undefined) setRecordIndex(nextIndex);
+      setSavedNotice('Registros guardados. No se ha confirmado ninguna evaluación deportiva.');
+    } finally { setRecordSaving(false); }
+  }
+
   async function previous() {
-    if ((comments[player.id] ?? '') !== (ev?.comment ?? '') && !await update('comment', comments[player.id] ?? '', player)) return;
+    if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
     setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length);
   }
 
   async function goToPlayer(nextIndex: number) {
-    if ((comments[player.id] ?? '') !== (ev?.comment ?? '') && !await update('comment', comments[player.id] ?? '', player)) return;
+    if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
     setIndex(nextIndex);
   }
 
   async function next() {
-    if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) {
-      const okComment = await update('comment', comments[player.id] ?? '', player);
-      if (!okComment) return;
-    }
+    if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
-
     // Navigation must never finalize an evaluation; only Confirm does that.
     setIndex(current => (current + 1) % evaluablePlayers.length);
   }
 
+  async function confirmRecordsOnly() {
+    if (!isAdmin || locked || recordSaving) return;
+    if (!window.confirm('¿Finalizar los registros de este partido sin puntuaciones deportivas? Después quedarán bloqueados.')) return;
+
+    setRecordSaving(true);
+    try {
+      if (recordPlayer && !await saveComment(recordPlayer)) return;
+      for (const target of recordPlayers) {
+        if (!await saveCardIfNeeded(target)) return;
+      }
+
+      // Never silently convert a previously scored session to records-only.
+      const { data: existing, error: readError } = await supabase
+        .from('evaluations').select('*').eq('session_id', session.id);
+      if (readError) { setError(readError.message); return; }
+      const hasScores = (existing || []).some((row: any) =>
+        ALL_SCORE_FIELDS.some(field => row[field] != null && !isFieldNA(row, field))
+      );
+      if (hasScores) {
+        setError('Esta sesión ya tiene puntuaciones deportivas. No puede cerrarse como «Solo registros» sin revisar primero esas evaluaciones.');
+        return;
+      }
+
+      const { error } = await supabase.from('sessions').update({
+        records_only_confirmed: true,
+        evaluation_confirmed: true,
+        evaluation_confirmed_at: new Date().toISOString(),
+      }).eq('id', session.id);
+      if (error) { setError('No se pudo finalizar el registro: ' + error.message); return; }
+
+      setLocalLocked(true);
+      setSavedNotice('Partido finalizado sin evaluación deportiva.');
+      await reload(session.id);
+    } finally {
+      setRecordSaving(false);
+    }
+  }
+
   async function confirmEvaluation() {
+    if (recordsOnlyCompleted) return;
     const confirmed = window.confirm('¿Confirmar evaluación? El coach no podrá modificarla después.');
     if (!confirmed) return;
 
     for (const target of evaluablePlayers) if (!await saveCardIfNeeded(target)) return;
-    if ((comments[player.id] ?? '') !== (ev?.comment ?? '')) {
-      if (!await update('comment', comments[player.id] ?? '', player)) return;
-    }
+    if (!await saveComment(player)) return;
     // Persist the displayed default 3 for every eligible player before locking.
     // Never overwrite existing scores (including values 1, 2, 4 or 5).
     setError('');
@@ -360,7 +477,7 @@ export function EvaluationPage({
 
     const { error } = await supabase
       .from('sessions')
-      .update({ evaluation_confirmed: false, evaluation_confirmed_at: null })
+      .update({ evaluation_confirmed: false, evaluation_confirmed_at: null, records_only_confirmed: false })
       .eq('id', session.id);
 
     if (error) { setError(error.message); return; }
@@ -377,14 +494,71 @@ export function EvaluationPage({
 
   return (
     <div className="stack">
-      <Card className={locked ? 'locked-card confirmed-card' : ''}>
+      {isAdmin && !locked && <Card>
         <p className="kicker">Evaluación</p>
         <h2>{session.name}</h2>
-        <p className="muted"></p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,padding:5,marginTop:16,background:'#e4e7e3',borderRadius:18}}>
+          <button type="button" onClick={() => { if (recordPlayer && dirtyComments[recordPlayer.id]) { setError('Guarda el comentario antes de cambiar de modo.'); return; } setAdminRecordsMode(false); }}
+            style={{border:'none',borderRadius:13,padding:'12px 8px',fontWeight:700,cursor:'pointer',background:!adminRecordsMode?'#efffbb':'transparent',color:'#111'}}>
+            Evaluación deportiva
+          </button>
+          <button type="button" onClick={() => setAdminRecordsMode(true)}
+            style={{border:'none',borderRadius:13,padding:'12px 8px',fontWeight:700,cursor:'pointer',background:adminRecordsMode?'#efffbb':'transparent',color:'#111'}}>
+            Solo registros (sin puntuación)
+          </button>
+        </div>
+        <p className="muted" style={{marginTop:10}}>{adminRecordsMode ? 'Registra comentarios y tarjetas sin generar puntuaciones deportivas.' : 'Evalúa a los jugadores y registra sus comentarios y tarjetas.'}</p>
+      </Card>}
+      {adminRecordsMode && isAdmin && !locked ? <>
+        <Card>
+          <h2>Registros del partido · sin evaluación deportiva</h2>
+          <p className="muted">Selecciona cualquier jugador de la plantilla, aunque no esté convocado. Los comentarios y tarjetas se guardan al cambiar de jugador o al pulsar «Guardar registros». No se generan notas de 3. Al finalizar los registros, el partido quedará bloqueado.</p>
+        </Card>
+        {recordPlayer ? <>
+          <Card>
+            <strong>Jugador</strong>
+            <select value={recordIndex} disabled={recordSaving} onChange={e => void saveRecordAndNavigate(Number(e.target.value))}>
+              {recordPlayers.map((p,i) => <option key={p.id} value={i}>{p.display_name}</option>)}
+            </select>
+          </Card>
+          <Card key={'record-comment-'+recordPlayer.id}>
+            <strong>Comentario de {recordPlayer.display_name}</strong>
+            <textarea disabled={recordSaving} value={comments[recordPlayer.id] ?? localEvaluations.find(e=>e.player_id===recordPlayer.id)?.comment ?? ''}
+              onChange={e => {setComments(prev=>({...prev,[recordPlayer.id]:e.target.value}));setDirtyComments(prev=>({...prev,[recordPlayer.id]:true}));setSavedNotice('');}}
+              placeholder="Motivo de no convocatoria, no participación, observaciones..." />
+          </Card>
+          {['friendly_match','league_match','tryout','scrimmage'].includes(session.type) && <Card>
+            <strong>Tarjeta de {recordPlayer.display_name}</strong>
+            <select disabled={recordSaving || savingCard} value={recordDraft?.type || 'none'} onChange={e => setCardDraft(recordPlayer.id,{type:e.target.value})}>
+              {cardOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            {(recordDraft?.type || 'none') !== 'none' && <>
+              <textarea disabled={recordSaving} placeholder="Motivo de la tarjeta" value={recordDraft?.reason || ''} onChange={e=>setCardDraft(recordPlayer.id,{reason:e.target.value})} />
+              {['straight_red','double_yellow'].includes(recordDraft?.type || '') && <input disabled={recordSaving} type="number" min="1" value={recordDraft?.matches || '1'} onChange={e=>setCardDraft(recordPlayer.id,{matches:e.target.value})} placeholder="Partidos de sanción" />}
+            </>}
+            <p className="muted">Registrada: {savedCards.filter(c=>c.player_id===recordPlayer.id).map(c=>c.type).join(', ') || 'Ninguna'}</p>
+          </Card>}
+          <div className="row" style={{gap:10}}>
+            <button className="secondary" disabled={recordSaving} onClick={() => void saveRecordAndNavigate((recordIndex-1+recordPlayers.length)%recordPlayers.length)}>← Anterior</button>
+            <button className="primary" disabled={recordSaving} onClick={() => void saveRecordAndNavigate()}>Guardar registros</button>
+            <button className="secondary" disabled={recordSaving} onClick={() => void saveRecordAndNavigate((recordIndex+1)%recordPlayers.length)}>Siguiente →</button>
+          </div>
+          <Card>
+            <strong>Finalizar partido sin puntuaciones</strong>
+            <p className="muted">Guarda los registros pendientes y marca el partido como completado. No se generan notas deportivas. Después quedará bloqueado, como una evaluación confirmada.</p>
+            <button className="primary" disabled={recordSaving || savingCard} onClick={() => void confirmRecordsOnly()}>
+              <CheckCircle2 size={18} /> Confirmar solo registros
+            </button>
+          </Card>
+        </> : <Card><p>Cargando plantilla…</p></Card>}
+        {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
+      </> : <>
+      <Card className={locked ? 'locked-card confirmed-card' : ''}>
+        {(!isAdmin || locked) && <><p className="kicker">Evaluación</p><h2>{session.name}</h2></>}
 
         {locked ? (
           <div className="stack">
-            <button className="primary confirmed" disabled><CheckCircle2 size={18} /> Evaluación confirmada</button>
+            <button className="primary confirmed" disabled><CheckCircle2 size={18} /> {recordsOnlyCompleted ? "Registros confirmados · sin notas" : "Evaluación confirmada"}</button>
             {isAdmin && <button className="secondary danger" onClick={reopenEvaluation}><RotateCcw size={16} /> Reabrir evaluación</button>}
           </div>
         ) : (
@@ -470,14 +644,15 @@ export function EvaluationPage({
 
       <Card key={'comment-'+player.id}>
         <strong>Comentario de {player.display_name}</strong>
-        <textarea disabled={locked} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true}));}} placeholder="Comentario individual..." />
-        <button className="secondary" disabled={locked} onClick={()=>void update('comment',comments[player.id] ?? '',player)}>Guardar comentario</button>
+        <textarea disabled={locked} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true})); setSavedNotice('');}} placeholder="Comentario individual..." />
+        <p className="muted">El comentario se guarda al cambiar de jugador o al confirmar la evaluación.</p>
       </Card>
 
       <div className="row" style={{justifyContent:'space-between', gap:12}}>
         <button className="secondary" disabled={locked} onClick={previous}>← Jugador anterior</button>
         <button className="primary" disabled={locked} onClick={next}>Siguiente jugador <ChevronRight size={18} /></button>
       </div>
+      </>}
       </>}
     </div>
   );

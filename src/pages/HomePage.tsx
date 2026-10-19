@@ -41,9 +41,10 @@ export function HomePage({
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
   const [suspensions, setSuspensions] = useState<any[]>([]);
 
-  const evaluatedCount = evaluations.filter((e: Evaluation) => e.evaluated).length;
+  const evaluatedCount = evaluations.filter((e: Evaluation) => e.evaluated && evaluationTotal(e) !== null).length;
   const cardWarnings = getCardWarnings(cardTotals).slice(0, 8);
   const sessionIsToday = nextSession?.session_date === new Date().toISOString().slice(0, 10);
+  const recordsOnlyDone = Boolean((selectedSession as (AppSession & { records_only_confirmed?: boolean }) | null)?.records_only_confirmed);
   const evaluationDone = !!selectedSession?.evaluation_confirmed || (players.length > 0 && evaluatedCount >= players.length);
 
   useEffect(() => {
@@ -107,8 +108,8 @@ export function HomePage({
             <span>Asistencia</span>
           </div>
           <div className={evaluationDone ? 'progress-card done' : 'progress-card'}>
-            <strong>{evaluatedCount}/{players.length}</strong>
-            <span>Evaluación</span>
+            <strong>{recordsOnlyDone ? "✓" : `${evaluatedCount}/${players.length}`}</strong>
+            <span>{recordsOnlyDone ? "Registros sin notas" : "Evaluación"}</span>
           </div>
         </div>
       </Card>

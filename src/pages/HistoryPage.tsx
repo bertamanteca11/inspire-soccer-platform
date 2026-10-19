@@ -62,8 +62,8 @@ export function HistoryPage() {
         name: playerName,
         callup: c ? translateCallup(c.status) : 'No convocado',
         attendance: a ? translateAttendance(a.status) : '-',
-        total_score: evaluationTotal(e) ?? 'N/A',
-        evaluated: e?.evaluated ? 'Sí' : 'No',
+        total_score: e?.evaluated ? (evaluationTotal(e) ?? 'N/A') : 'N/A',
+        evaluated: e?.evaluated && evaluationTotal(e) !== null ? 'Sí' : 'No',
         tactical_discipline: e?.tactical_discipline ?? '-',
         effort_commitment: e?.effort_commitment ?? '-',
         decision_making: e?.decision_making ?? '-',
@@ -75,7 +75,7 @@ export function HistoryPage() {
   }, [callups, attendance, evaluations]);
 
   const topPlayers = [...evaluations]
-    .filter(e => evaluationTotal(e)!==null)
+    .filter(e => e.evaluated && evaluationTotal(e)!==null)
     .sort((a, b) => Number(evaluationTotal(b)) - Number(evaluationTotal(a)))
     .slice(0, 3);
 
@@ -94,6 +94,7 @@ export function HistoryPage() {
           <p className="kicker">Sesión seleccionada</p>
           <h2>{selectedSession.name}</h2>
           <p>{formatDate(selectedSession.session_date)} · {selectedSession.type}</p>
+          {selectedSession.records_only_confirmed && <p className="muted">Registros confirmados · sin puntuaciones deportivas</p>}
         </Card>
       )}
 
@@ -108,7 +109,7 @@ export function HistoryPage() {
           <div className="history-grid">
             <Card><p className="kicker">Convocados</p><h2>{callups.length}</h2></Card>
             <Card><p className="kicker">Asistencias</p><h2>{attendance.length}</h2></Card>
-            <Card><p className="kicker">Evaluaciones</p><h2>{evaluations.filter(e => e.evaluated && !e.not_applicable).length}</h2></Card>
+            <Card><p className="kicker">Evaluaciones</p><h2>{evaluations.filter(e => e.evaluated && evaluationTotal(e) !== null).length}</h2></Card>
           </div>
 
           <Card>
