@@ -4,7 +4,7 @@ import { AttendanceBreakdown } from '../components/AttendanceBreakdown';
 import { officialEvaluations } from '../lib/performance';
 import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, HeartPulse, Plus, ShieldAlert } from 'lucide-react';
 import { PlayerAvatar, avatarOptions } from '../components/PlayerAvatar';
 import { supabase } from '../supabase';
@@ -13,6 +13,8 @@ import { Card, Modal, PageTitle } from '../components/ui';
 import { MiniLineChart } from '../components/MiniLineChart';
 import { translatePosition, translateStatus, translateInjuryStatus } from '../utils/formatters';
 import { average } from '../utils/stats';
+
+const VeoPlayerPanel = lazy(() => import('../components/VeoPlayerPanel').then(module => ({ default: module.VeoPlayerPanel })));
 
 type PlayerView = 'list' | 'detail';
 type PlayerFormState = { name:string; nickname:string; position:string; shirt_number:string; status:string; birth_date:string; career_notes:string; photo_url:string };
@@ -50,7 +52,7 @@ export function PlayersPage({ role = 'admin' }: {role?: string}) {
       <section className="profile-section"><div className="section-heading"><strong>Tarjetas</strong><ShieldAlert size={17}/></div><div className="card-summary"><span><b>{cards.filter(c=>c.type==='yellow').length}</b> amarillas</span><span><b>{cards.filter(c=>['straight_red','double_yellow'].includes(c.type)).length}</b> rojas</span></div></section>
       <section className="profile-section"><div className="section-heading"><strong>Lesiones</strong><span>{injuries.length} registradas</span></div>{injuries.length===0?<p>No hay lesiones registradas.</p>:injuries.slice(0,8).map(i=><div className="history-line" key={i.id}><span>{formatDate(i.start_date)}</span><strong>{i.body_area||i.injury_type||'Lesión'}</strong><span>{translateInjuryStatus(i.status)}</span></div>)}</section>
       <section className="profile-section"><strong>Trayectoria y notas</strong><p className="career-copy">{selected.career_notes||'Todavía no hay notas sobre la trayectoria de este jugador.'}</p></section>
-    </Card>{role === 'admin' && <Card><h3>Editar datos</h3>{saveStatus&&<div role="status" className={saveStatus.ok?"save-feedback success":"save-feedback failure"}>{saveStatus.text}</div>}<PlayerForm form={form} setForm={setForm} onSubmit={savePlayer} submitLabel={saving?"Guardando...":"Guardar cambios"}/></Card>}</div>;
+    </Card><Suspense fallback={<Card><p>Cargando VEO...</p></Card>}><VeoPlayerPanel playerId={selected.id}/></Suspense>{role === 'admin' && <Card><h3>Editar datos</h3>{saveStatus&&<div role="status" className={saveStatus.ok?"save-feedback success":"save-feedback failure"}>{saveStatus.text}</div>}<PlayerForm form={form} setForm={setForm} onSubmit={savePlayer} submitLabel={saving?"Guardando...":"Guardar cambios"}/></Card>}</div>;
   }
   return <div className="stack"><div className="row"><PageTitle title="Jugadores" subtitle="Plantilla, perfiles y seguimiento individual."/>{role === 'admin' && <button className="icon-btn big" onClick={()=>{setSelected(null);setForm(emptyForm);setShowCreate(true)}}><Plus size={20}/></button>}</div>{birthdays.length>0&&birthdays[0].days<=30&&<Card className="birthday-card"><div className="row"><div><p className="kicker">Próximos cumpleaños</p><strong>{birthdays[0].p.display_name}</strong><p>{birthdayLabel(birthdays[0].days)} · {formatBirthday(birthdays[0].p.birth_date!)}</p></div><span className="birthday-emoji">🎂</span></div></Card>}{players.filter(player => player.status !== 'inactive').map(player=><Card key={player.id}><button className="list-row-button player-list-row" onClick={()=>openPlayer(player)}><PlayerAvatar player={player}/><div><strong>{player.shirt_number?`${player.shirt_number}. `:''}{player.display_name}</strong><p>{translatePosition(player.position)} · {translateStatus(player.status)}</p></div><span>›</span></button></Card>)}{saveStatus&&<div role="status" className={saveStatus.ok?"save-feedback success":"save-feedback failure"}>{saveStatus.text}</div>}{showCreate&&<Modal title="Añadir jugador" onClose={()=>setShowCreate(false)}><PlayerForm form={form} setForm={setForm} onSubmit={savePlayer} submitLabel="Crear jugador"/></Modal>}</div>;
 }

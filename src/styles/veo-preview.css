@@ -1,0 +1,23 @@
+.veo-preview { width:100%; min-width:0; }
+.veo-preview .veo-file { display:grid; gap:8px; margin:16px 0; font-weight:700; }
+.veo-preview .veo-table-wrap { max-width:100%; overflow-x:auto; margin:12px 0; }
+.veo-preview table { width:100%; border-collapse:collapse; font-size:13px; }
+.veo-preview th,.veo-preview td { padding:10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line,#dde2ef); min-width:80px; }
+.veo-preview th { background:var(--accent-soft,#e8eaf6); }
+.veo-preview details { margin:12px 0; }
+.veo-preview summary { cursor:pointer; font-weight:700; padding:6px 0; }
+.veo-preview details .veo-source { min-width:420px; }
+.veo-preview .veo-hash { overflow-wrap:anywhere; font-size:12px; }
+.veo-preview .veo-notice { background:#fff4d6; padding:14px; border-radius:12px; margin:12px 0; }
+.veo-preview .veo-notes { white-space:pre-wrap; overflow-wrap:anywhere; }
+.veo-preview .veo-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+.veo-preview .veo-metrics>div { display:grid; gap:5px; background:#f3f5f8; padding:12px; border-radius:12px; }
+.veo-preview .veo-metrics strong { font-size:20px; }
+.veo-preview .veo-filters { display:flex; gap:12px; flex-wrap:wrap; }
+.veo-preview .veo-filters>label { flex:1; min-width:180px; }
+.veo-preview .veo-issues { max-height:520px; overflow-y:auto; }
+.veo-preview .veo-issue { border-left:4px solid #657685; padding:10px 14px; margin:10px 0; background:#f5f7fa; }
+.veo-preview .veo-issue.error { border-color:#b42318; }
+.veo-preview .veo-issue.warning { border-color:#a66500; }
+.veo-preview .veo-issue p { overflow-wrap:anywhere; }
+.veo-preview code { font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }

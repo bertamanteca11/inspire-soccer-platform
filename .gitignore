@@ -1,2 +1,14 @@
 node_modules/
 .env
+.env.*
+!.env.example
+*.xlsx
+*.xlsx1
+*.xls
+*.xlsm
+*.tsbuildinfo
+/dist/
+/data/*.xlsx1
+/data/*.xlsx
+/.veo-build-check/
+/.veo-test-artifacts/

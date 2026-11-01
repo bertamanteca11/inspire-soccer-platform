@@ -2,21 +2,27 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/phase1.test.cjs tests/veo.test.cjs tests/veo-analytics.test.cjs tests/veo-database.test.cjs",
+    "build:check": "tsc --noEmit --incremental false && vite build --outDir .veo-build-check --emptyOutDir false",
+    "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.8",
-    "typescript": "^5.6.2",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "lucide-react": "^0.468.0",
     "recharts": "^2.12.7",
-    "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4"
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.14",
+    "@playwright/test": "1.64.1",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1"
   }

@@ -1,0 +1,28 @@
+@import './veo-preview.css';
+.veo-module { width:100%; min-width:0; max-width:1200px; margin:auto; }
+.veo-hero { padding:24px; border-radius:24px; background:linear-gradient(135deg,#18382b,#284b3d); color:#f7ffe9; }
+.veo-hero h2 { font-size:clamp(25px,4vw,38px); margin:8px 0; }
+.veo-hero .kicker { color:#dfff95; }
+.veo-source-controls { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.veo-source-controls>label { flex:1; min-width:160px; display:grid; gap:5px; }
+.veo-tabs { display:flex; flex-wrap:wrap; gap:7px; }
+.veo-tabs button { padding:11px 15px; border:1px solid #d7ded8; border-radius:14px; background:white; color:#1e3529; font-weight:700; }
+.veo-tabs button.active { background:#dfff95; border-color:#b1cd73; }
+.veo-local-notice { border-left:4px solid #b57a15; background:#fff6df; padding:13px; border-radius:8px; }
+.veo-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+.veo-kpis>div { display:grid; gap:7px; border:1px solid #e1e7e1; padding:14px; border-radius:15px; background:#f7faf5; }
+.veo-kpis strong { font-size:25px; color:#203d2d; }
+.veo-kpis span { font-size:13px; }
+.veo-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.veo-chart { height:245px; width:100%; min-width:0; margin:12px 0; }
+.veo-module .veo-table-wrap { max-width:100%; overflow-x:auto; margin:12px 0; }
+.veo-module table { width:100%; border-collapse:collapse; font-size:13px; }
+.veo-module th,.veo-module td { text-align:left; vertical-align:top; padding:10px; border-bottom:1px solid #e1e7e1; }
+.veo-module th { background:#edf4e9; }
+.veo-module summary { font-weight:700; padding:10px 0; cursor:pointer; }
+.veo-module .veo-notes { white-space:pre-wrap; overflow-wrap:anywhere; }
+.veo-review-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.veo-review-grid label { display:grid; gap:5px; padding:12px; border:1px solid #e1e7e1; border-radius:12px; }
+.veo-approval { display:flex; gap:10px; align-items:flex-start; margin:15px 0; }
+.veo-approval input { width:auto; flex:0 0 auto; margin-top:5px; }
+@media(max-width:680px) { .veo-columns,.veo-review-grid { grid-template-columns:1fr; } .veo-hero { padding:18px; } .veo-tabs button { flex:1 1 130px; } }

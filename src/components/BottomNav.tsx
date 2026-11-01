@@ -13,7 +13,7 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const secondaryTabs: Tab[] = ['callup', 'attendance', 'evaluation', 'standouts', 'injuries', 'history', 'intelligence', 'reports'];
+  const secondaryTabs: Tab[] = ['callup', 'attendance', 'evaluation', 'standouts', 'injuries', 'history', 'intelligence', 'reports', 'veo'];
 
   return (
     <>
@@ -30,6 +30,7 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
               <MoreItem onClick={() => go('evaluation')} icon={<Star />} label="Evaluar" />
               {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('standouts')} icon={<Star />} label="Destacados" />}
               <MoreItem onClick={() => go('injuries')} icon={<HeartPulse />} label="Lesiones" />
+              {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('veo')} icon={<BarChart3 />} label="VEO Analytics" />}
               {isAdmin && <MoreItem onClick={() => go('intelligence')} icon={<Shield />} label="Seguimiento semanal" />}
               {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('reports')} icon={<BarChart3 />} label="Informes" />}
               {(isAdmin || role === 'coach') && <MoreItem onClick={() => go('history')} icon={<Shield />} label="Histórico" />}

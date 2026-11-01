@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { VeoProvider } from './veo/VeoContext';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { LogOut, Shield } from 'lucide-react';
 import { supabase } from './supabase';
 import type { Attendance, Evaluation, Player, Role } from './types';
@@ -21,12 +22,15 @@ import { StandoutsPage } from './pages/StandoutsPage';
 import { IntelligencePage } from './pages/IntelligencePage';
 import { ReportsPage } from './pages/ReportsPage';
 
+const VeoAnalytics = lazy(() => import('./pages/VeoModule').then(module => ({ default: module.VeoModule })));
+
 const DEV_BYPASS_LOGIN = false;
 const LOGO_URL = '/assets/logo.png';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<Role>('viewer');
+  const [roleUserId, setRoleUserId] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,7 +50,7 @@ export default function App() {
     if (!user) return;
 
     supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data }: any) => {
-      if (data?.role) setRole(data.role);
+      if (data?.role) { setRole(data.role); setRoleUserId(user.id); }
     });
   }, [user]);
 
@@ -54,10 +58,17 @@ export default function App() {
   if (DEV_BYPASS_LOGIN) return <Platform role="admin" />;
   if (!user) return <LoginPage logoUrl={LOGO_URL} />;
 
-  return <Platform role={role} />;
+  // Direct authenticated entry avoids mounting operational pages/RPCs when
+  // opening a local preview. It never bypasses login or role verification.
+  const previewRole = roleUserId === user.id ? role : 'viewer';
+  const query = new URLSearchParams(window.location.search);
+  if (query.get('veo-preview') === '1' || query.get('veo') === '1') {
+    return <VeoProvider key={user.id} role={previewRole}><Screen><Suspense fallback={<p>Cargando VEO...</p>}><VeoAnalytics initialSection={query.get('veo-preview') === '1' ? 'import' : query.has('player') ? 'players' : 'dashboard'}/></Suspense></Screen></VeoProvider>;
+  }
+  return <VeoProvider key={user.id} role={previewRole}><Platform role={role} previewRole={previewRole}/></VeoProvider>;
 }
 
-function Platform({ role }: { role: Role }) {
+function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: Role }) {
   const [tab, setTab] = useState<Tab>(role === 'coach' ? 'attendance' : 'home');
   const [nextSession, setNextSession] = useState<AppSession | null>(null);
   const [selectedSession, setSelectedSession] = useState<AppSession | null>(null);
@@ -214,6 +225,7 @@ if (playerIds.length > 0) {
           {tab === 'standouts' && <StandoutsPage role={role} />}
           {tab === 'intelligence' && isAdmin && <IntelligencePage />}
           {tab === 'reports' && (isAdmin || isCoach) && <ReportsPage />}
+          {tab === 'veo' && <Suspense fallback={<Card><p>Cargando visor VEO...</p></Card>}><VeoAnalytics/></Suspense>}
           {tab === 'history' && (isAdmin || isCoach) && <HistoryPage />}
 
           {['callup', 'attendance', 'evaluation', 'injuries'].includes(tab) && !selectedSession && (
@@ -245,6 +257,7 @@ function getHeaderTitle(tab: Tab) {
     history: 'Histórico',
     intelligence: 'Seguimiento semanal',
     reports: 'Informes',
+    veo: 'VEO Analytics',
   };
 
   return map[tab];
