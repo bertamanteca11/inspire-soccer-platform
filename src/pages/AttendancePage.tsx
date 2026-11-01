@@ -1,3 +1,4 @@
+import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useState } from 'react';
 import { CheckCircle2, RotateCcw, Save } from 'lucide-react';
 import { supabase } from '../supabase';
@@ -62,7 +63,7 @@ export function AttendancePage({
       else setRoster((data || []) as Player[]);
     });
   }, [session.id]);
-  const attendancePlayers = roster.length ? roster : players;
+  const attendancePlayers = sortPlayersByJersey(roster.length ? roster : players);
 
   const locked = localLocked;
   const isAdmin = role === 'admin';

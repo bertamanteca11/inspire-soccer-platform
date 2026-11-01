@@ -1,10 +1,15 @@
+import { attendanceStats } from '../utils/attendance';
+import { loadAttendanceStatistics } from '../lib/attendance';
+import { AttendanceBreakdown } from '../components/AttendanceBreakdown';
+import { isOfficialPerformanceSession, OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
-import { formatDate } from '../utils/formatters';
+import { formatDate, translateAttendance } from '../utils/formatters';
 
 export function HistoryPage() {
+  const [attendanceError,setAttendanceError]=useState('');
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [callups, setCallups] = useState<any[]>([]);
@@ -28,13 +33,13 @@ export function HistoryPage() {
     if (!sessionId) return;
 
     const call = await supabase.from('callups').select('*,players(display_name,position,status)').eq('session_id', sessionId);
-    const att = await supabase.from('attendance').select('*,players(display_name)').eq('session_id', sessionId);
+    const att = await loadAttendanceStatistics({sessionId});
     const ev = await supabase.from('evaluations').select('*,players(display_name)').eq('session_id', sessionId);
     const ca = await supabase.from('cards').select('*,players(display_name)').eq('session_id', sessionId);
     const su = await supabase.from('suspensions').select('*,players(display_name)').eq('created_from_session_id', sessionId);
 
     setCallups(call.data || []);
-    setAttendance(att.data || []);
+    setAttendance(att.data || []); setAttendanceError(att.error?.message || '');
     setEvaluations(ev.data || []);
     setCards(ca.data || []);
     setSuspensions(su.data || []);
@@ -60,21 +65,21 @@ export function HistoryPage() {
       return {
         player_id: id,
         name: playerName,
-        callup: c ? translateCallup(c.status) : 'No convocado',
-        attendance: a ? translateAttendance(a.status) : '-',
-        total_score: e?.evaluated ? (evaluationTotal(e) ?? 'N/A') : 'N/A',
-        evaluated: e?.evaluated && evaluationTotal(e) !== null ? 'Sí' : 'No',
-        tactical_discipline: e?.tactical_discipline ?? '-',
-        effort_commitment: e?.effort_commitment ?? '-',
-        decision_making: e?.decision_making ?? '-',
-        mentality_attitude: e?.mentality_attitude ?? '-',
-        coachability: e?.coachability ?? '-',
+        callup: c ? translateCallup(c.status) : 'Sin registro',
+        attendance: a ? translateAttendance(a.status) : 'Sin registro',
+        total_score: selectedSession?.records_only_confirmed ? 'N/A' : (e?.evaluated ? (evaluationTotal(e) ?? 'N/A') : 'N/A'),
+        evaluated: !selectedSession?.records_only_confirmed && e?.evaluated && evaluationTotal(e) !== null ? 'Sí' : 'No',
+        tactical_discipline: selectedSession?.records_only_confirmed ? '-' : (e?.na_fields?.tactical_discipline || e?.not_applicable ? 'N/A' : (e?.tactical_discipline ?? '-')),
+        effort_commitment: selectedSession?.records_only_confirmed ? '-' : (e?.na_fields?.effort_commitment || e?.not_applicable ? 'N/A' : (e?.effort_commitment ?? '-')),
+        decision_making: selectedSession?.records_only_confirmed ? '-' : (e?.na_fields?.decision_making || e?.not_applicable ? 'N/A' : (e?.decision_making ?? '-')),
+        mentality_attitude: selectedSession?.records_only_confirmed ? '-' : (e?.na_fields?.mentality_attitude || e?.not_applicable ? 'N/A' : (e?.mentality_attitude ?? '-')),
+        coachability: selectedSession?.records_only_confirmed ? '-' : (e?.na_fields?.coachability || e?.not_applicable ? 'N/A' : (e?.coachability ?? '-')),
         comment: e?.comment || '',
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [callups, attendance, evaluations]);
+  }, [callups, attendance, evaluations, selectedSession]);
 
-  const topPlayers = [...evaluations]
+  const topPlayers = (isOfficialPerformanceSession(selectedSession) ? [...evaluations] : [])
     .filter(e => e.evaluated && evaluationTotal(e)!==null)
     .sort((a, b) => Number(evaluationTotal(b)) - Number(evaluationTotal(a)))
     .slice(0, 3);
@@ -82,6 +87,8 @@ export function HistoryPage() {
   return (
     <div className="stack">
       <PageTitle title="Histórico admin" subtitle="Revisa convocatoria, asistencia, evaluaciones, tarjetas y sanciones de cada sesión." />
+
+      {attendanceError && <p role="alert">No se pudo cargar la asistencia: {attendanceError}</p>}
 
       <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
         {sessions.map(s => (
@@ -107,13 +114,13 @@ export function HistoryPage() {
       {view === 'summary' && (
         <>
           <div className="history-grid">
-            <Card><p className="kicker">Convocados</p><h2>{callups.length}</h2></Card>
-            <Card><p className="kicker">Asistencias</p><h2>{attendance.length}</h2></Card>
-            <Card><p className="kicker">Evaluaciones</p><h2>{evaluations.filter(e => e.evaluated && evaluationTotal(e) !== null).length}</h2></Card>
+            <Card><p className="kicker">Convocados</p><h2>{callups.filter(c => c.status !== 'not_called').length}</h2></Card>
+            <Card><p className="kicker">Asistencias</p><h2>{attendanceError ? '-' : attendanceStats(attendance).recorded}</h2></Card>
+            <Card><p className="kicker">Evaluaciones</p><h2>{selectedSession?.records_only_confirmed ? 0 : evaluations.filter(e => e.evaluated && evaluationTotal(e) !== null).length}</h2></Card>
           </div>
 
           <Card>
-            <p className="kicker">Top 3 sesión</p>
+            <AttendanceBreakdown rows={attendance} error={attendanceError}/><p className="kicker">Top 3 sesión</p><p className="muted">{OFFICIAL_PERFORMANCE_LABEL}. Las notas y comentarios anteriores se conservan en Jugadores.</p>
             {topPlayers.length === 0 && <p>No hay evaluaciones.</p>}
             {topPlayers.map((e, i) => (
               <div className="top-row" key={e.id}>
@@ -178,18 +185,6 @@ export function HistoryPage() {
       )}
     </div>
   );
-}
-
-function translateAttendance(status?: string | null) {
-  const map: Record<string, string> = {
-    present: 'Presente',
-    late: 'Tarde',
-    justified_late: 'Tarde justificado',
-    justified_absence: 'Ausencia justificada',
-    unjustified_absence: 'Ausencia',
-    injured: 'Lesionado',
-  };
-  return status ? map[status] || status : '-';
 }
 
 function translateCallup(status?: string | null) {

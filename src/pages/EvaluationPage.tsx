@@ -1,3 +1,4 @@
+import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronRight, RotateCcw, Search } from 'lucide-react';
 import { supabase } from '../supabase';
@@ -49,7 +50,6 @@ const cardOptions = [
 const DEFAULT_SCORE = 3;
 const ALL_SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'] as const;
 
-const absentStatuses = ['justified_absence', 'unjustified_absence', 'injured', 'injured_present', 'injured_justified_absence', 'injured_unjustified_absence'];
 
 export function EvaluationPage({
   role,
@@ -142,7 +142,7 @@ export function EvaluationPage({
   }
 
   const evaluablePlayers = useMemo(() => {
-    return players.filter((p: Player) => {
+    return sortPlayersByJersey(players).filter((p: Player) => {
       const att = attendance.find((a: Attendance) => a.player_id === p.id);
       return !!att && ['present','late','justified_late'].includes(att.status);
     });
@@ -159,7 +159,7 @@ export function EvaluationPage({
     setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || {type:'none',reason:'',matches:'1'}), ...patch}}));
   }
   const counters = useMemo(() => getRatingCounts(localEvaluations), [localEvaluations]);
-  const recordPlayers = roster;
+  const recordPlayers = sortPlayersByJersey(roster);
   const recordPlayer = recordPlayers[recordIndex];
   const recordCard = savedCards.find(c => c.player_id === recordPlayer?.id);
   const recordDraft = recordPlayer ? (cardDrafts[recordPlayer.id] || {type:recordCard?.type || 'none',reason:recordCard?.reason || '',matches:'1'}) : null;
@@ -494,6 +494,9 @@ export function EvaluationPage({
 
   return (
     <div className="stack">
+      {isAdmin && locked && !recordsOnlyCompleted && <Card>
+        <p className="muted">Si este es un partido histórico sin puntuaciones, pulsa «Reabrir evaluación» para acceder a «Solo registros». Reabrir no borra comentarios, tarjetas, asistencia ni N/A.</p>
+      </Card>}
       {isAdmin && !locked && <Card>
         <p className="kicker">Evaluación</p>
         <h2>{session.name}</h2>

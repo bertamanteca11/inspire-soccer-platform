@@ -6,12 +6,13 @@ import type { AppSession } from '../utils/appTypes';
 import type { Player, Role } from '../types';
 import { formatDate } from '../utils/formatters';
 
+type StandoutSession = AppSession & { records_only_confirmed?: boolean | null };
 type Slot = 'top_1'|'top_2'|'bottom_1'|'bottom_2';
 type Picks = Record<Slot, string>;
 const emptyPicks: Picks = { top_1:'', top_2:'', bottom_1:'', bottom_2:'' };
 
 export function StandoutsPage({ role }: { role: Role }) {
-  const [sessions,setSessions]=useState<AppSession[]>([]);
+  const [sessions,setSessions]=useState<StandoutSession[]>([]);
   const [sessionId,setSessionId]=useState('');
   const [players,setPlayers]=useState<Player[]>([]);
   const [picks,setPicks]=useState<Picks>(emptyPicks);
@@ -27,7 +28,7 @@ export function StandoutsPage({ role }: { role: Role }) {
   async function loadSessions(){
     setLoading(true);
     const {data}=await supabase.from('sessions').select('*').order('session_date',{ascending:false});
-    const rows=(data||[]) as AppSession[];
+    const rows=(data||[]) as StandoutSession[];
     setSessions(rows);
     if(rows[0]) setSessionId(rows[0].id);
     setLoading(false);
@@ -57,6 +58,10 @@ export function StandoutsPage({ role }: { role: Role }) {
   }
   async function save(){
     if(!canEdit) return;
+    if(sessions.find(s=>s.id===sessionId)?.records_only_confirmed === true){
+      setMessage('Esta sesión es Solo registros: no se pueden guardar Top/Bottom.');
+      return;
+    }
     const values=Object.values(picks);
     if(values.some(v=>!v)){ setMessage('Selecciona los 2 top performers y los 2 bottom performers.'); return; }
     if(new Set(values).size!==4){ setMessage('Selecciona cuatro jugadores diferentes.'); return; }
@@ -73,25 +78,27 @@ export function StandoutsPage({ role }: { role: Role }) {
     setMessage(ins.error?ins.error.message:'Standouts guardados correctamente.'); setSaving(false);
   }
   const current=sessions.find(s=>s.id===sessionId);
+  const readOnly = !canEdit || current?.records_only_confirmed === true;
   const playerName=(id:string)=>players.find(p=>p.id===id)?.display_name||'—';
   if(loading) return <Card><p>Cargando sesiones...</p></Card>;
   return <div className="stack">
     <PageTitle title="Session Standouts" subtitle="Selección subjetiva del staff después de cada entreno o partido." />
     <select value={sessionId} onChange={e=>setSessionId(e.target.value)}>{sessions.map(s=><option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)}</option>)}</select>
     {current && <Card className="standout-session"><p className="kicker">Sesión seleccionada</p><h2>{current.name}</h2><p>{formatDate(current.session_date)} · {current.type==='training'?'Entrenamiento':'Partido / sesión'}</p></Card>}
+    {current?.records_only_confirmed === true && <Card><p>Esta sesión está confirmada como «Solo registros». No se pueden editar ni guardar Top/Bottom.</p></Card>}
     <Card>
       <div className="standout-heading top"><Award size={22}/><div><h3>Top 2 performers</h3><p>Los dos jugadores que más destacaron.</p></div></div>
-      <StandoutSelect label="1 · Top performer" value={picks.top_1} players={players} disabled={!canEdit} onChange={(v:string)=>setPick('top_1',v)}/>
-      <StandoutSelect label="2 · Top performer" value={picks.top_2} players={players} disabled={!canEdit} onChange={(v:string)=>setPick('top_2',v)}/>
+      <StandoutSelect label="1 · Top performer" value={picks.top_1} players={players} disabled={readOnly} onChange={(v:string)=>setPick('top_1',v)}/>
+      <StandoutSelect label="2 · Top performer" value={picks.top_2} players={players} disabled={readOnly} onChange={(v:string)=>setPick('top_2',v)}/>
     </Card>
     <Card>
       <div className="standout-heading bottom"><TrendingDown size={22}/><div><h3>Bottom 2 performers</h3><p>Jugadores que necesitan más seguimiento tras esta sesión.</p></div></div>
-      <StandoutSelect label="1 · Follow-up" value={picks.bottom_1} players={players} disabled={!canEdit} onChange={(v:string)=>setPick('bottom_1',v)}/>
-      <StandoutSelect label="2 · Follow-up" value={picks.bottom_2} players={players} disabled={!canEdit} onChange={(v:string)=>setPick('bottom_2',v)}/>
+      <StandoutSelect label="1 · Follow-up" value={picks.bottom_1} players={players} disabled={readOnly} onChange={(v:string)=>setPick('bottom_1',v)}/>
+      <StandoutSelect label="2 · Follow-up" value={picks.bottom_2} players={players} disabled={readOnly} onChange={(v:string)=>setPick('bottom_2',v)}/>
     </Card>
-    <Card><label>Notas del staff<textarea rows={4} value={notes} disabled={!canEdit} onChange={e=>setNotes(e.target.value)} placeholder="Contexto de la sesión, decisiones subjetivas, aspectos a revisar..." /></label></Card>
+    <Card><label>Notas del staff<textarea rows={4} value={notes} disabled={readOnly} onChange={e=>setNotes(e.target.value)} placeholder="Contexto de la sesión, decisiones subjetivas, aspectos a revisar..." /></label></Card>
     {message && <p className={message.includes('correctamente')?'success':'error'}>{message}</p>}
-    {canEdit && <button className="primary standout-save" disabled={saving||!sessionId} onClick={save}><Save size={18}/>{saving?'Guardando...':'Guardar standouts'}</button>}
+    {canEdit && <button className="primary standout-save" disabled={saving||!sessionId||readOnly} onClick={save}><Save size={18}/>{saving?'Guardando...':'Guardar standouts'}</button>}
     {!canEdit && <Card><p><strong>Top:</strong> {playerName(picks.top_1)} · {playerName(picks.top_2)}</p><p><strong>Follow-up:</strong> {playerName(picks.bottom_1)} · {playerName(picks.bottom_2)}</p></Card>}
   </div>;
 }

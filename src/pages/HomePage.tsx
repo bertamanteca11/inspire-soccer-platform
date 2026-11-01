@@ -1,3 +1,6 @@
+import { attendanceStats } from '../utils/attendance';
+import { officialEvaluations } from '../lib/performance';
+import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
 import { AlertTriangle, Trophy, Ban, ClipboardList, Shield, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -36,6 +39,7 @@ export function HomePage({
   cardTotals: PlayerCardTotal[];
   setTab: (tab: Tab) => void;
 }) {
+  const [performanceError, setPerformanceError] = useState('');
   const [topMode, setTopMode] = useState<'matches' | 'trainings'>('matches');
   const [topMatches, setTopMatches] = useState<TopPlayer[]>([]);
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
@@ -53,13 +57,15 @@ export function HomePage({
   }, []);
 
   async function loadGlobalTops() {
-    const { data } = await supabase
-      .from('evaluations')
-      .select('player_id,total_score,not_applicable,na_fields,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,sessions(type),players(display_name)')
-      .eq('evaluated', true)
-      .not('total_score', 'is', null);
+    const { data, error } = await officialEvaluations()
+      .select('player_id,total_score,not_applicable,na_fields,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,sessions(type,records_only_confirmed),players(display_name)')
+      .eq('evaluated', true);
 
-    const rows = (data || []).filter((r:any)=>evaluationTotal(r)!==null);
+    if (error) { setPerformanceError(error.message); setTopMatches([]); setTopTrainings([]); return; }
+    setPerformanceError('');
+    const rows = (data || []).filter((r:any) =>
+      r.sessions && r.sessions.records_only_confirmed !== true && evaluationTotal(r) !== null
+    );
     const matchRows = rows.filter((r: any) =>
       ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(r.sessions?.type)
     );
@@ -104,8 +110,8 @@ export function HomePage({
             <span>Convocatoria</span>
           </div>
           <div className={selectedSession?.attendance_confirmed ? 'progress-card done' : 'progress-card'}>
-            <strong>{attendance.length}</strong>
-            <span>Asistencia</span>
+            <strong>{attendanceStats(attendance).recorded}</strong>
+            <span>Asistencia registrada</span><small>{attendanceStats(attendance).unjustifiedAbsences} ausencias injustificadas</small>
           </div>
           <div className={evaluationDone ? 'progress-card done' : 'progress-card'}>
             <strong>{recordsOnlyDone ? "✓" : `${evaluatedCount}/${players.length}`}</strong>
@@ -161,6 +167,8 @@ export function HomePage({
           </button>
         </div>
 
+        <p className="muted">{OFFICIAL_PERFORMANCE_LABEL}</p>
+        {performanceError && <p role="alert">No se pudo cargar el rendimiento oficial: {performanceError}</p>}
         {activeTop.length > 0 ? (
           activeTop.map((p, index) => (
             <div className="top-row" key={p.id}>
