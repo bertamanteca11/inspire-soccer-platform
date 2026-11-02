@@ -1,13 +1,12 @@
 import { VeoProvider } from './veo/VeoContext';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { LogOut, Shield } from 'lucide-react';
 import { supabase } from './supabase';
 import type { Attendance, Evaluation, Player, Role } from './types';
 import type { AppSession, PlayerCardTotal, Tab } from './utils/appTypes';
 import { buildSessionLabel } from './utils/formatters';
 import { getNextAvailableSession } from './lib/data';
 import { ACTIVE_SESSION_STATUSES, isActiveSession } from './utils/sessionArchive';
-import { BottomNav } from './components/BottomNav';
+import { ApplicationShell } from './components/shell/ApplicationShell';
 import { Card, Screen } from './components/ui';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
@@ -26,7 +25,7 @@ import { ReportsPage } from './pages/ReportsPage';
 const VeoAnalytics = lazy(() => import('./pages/VeoModule').then(module => ({ default: module.VeoModule })));
 
 const DEV_BYPASS_LOGIN = false;
-const LOGO_URL = '/assets/logo.png';
+const LOGO_URL = '/logo.png';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -201,35 +200,14 @@ if (playerIds.length > 0) {
   const headerTitle = getHeaderTitle(tab);
   const headerSubtitle = tab === 'home'
     ? nextSession ? buildSessionLabel(nextSession) : 'Sin próxima sesión'
-    : selectedSession ? buildSessionLabel(selectedSession) : '';
+    : ['sessions', 'callup', 'attendance', 'evaluation', 'injuries'].includes(tab) && selectedSession ? buildSessionLabel(selectedSession) : '';
 
   if (loadingData) {
     return <div className="app-shell"><div className="app"><main><Card><p>Cargando datos...</p></Card></main></div></div>;
   }
 
   return (
-    <div className="app-shell">
-      <div className="app">
-        <header>
-          <div className="header-left">
-            <span className="brand-symbol" aria-label="Inspire Soccer"><Shield size={24}/><span>IS</span></span>
-            <div>
-              <h1>{headerTitle}</h1>
-              <p>{headerSubtitle}</p>
-            </div>
-          </div>
-
-          <div className="header-actions">
-            <span className="role-pill">{role === 'admin' ? 'Admin' : role === 'coach' ? 'Entrenador' : 'Consulta'}</span>
-            <button className="icon-btn" onClick={() => supabase.auth.signOut()}>
-              <LogOut size={18} />
-            </button>
-          </div>
-        </header>
-
-        {error && <div className="error-banner">{error}</div>}
-
-        <main>
+    <ApplicationShell role={role} tab={tab} setTab={setTab} title={headerTitle} context={headerSubtitle} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
           {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
           {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
           {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage role={role} reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} onArchiveChange={onArchiveChange} onViewHistory={id => { setSummarySessionId(id); setTab('summary'); }} />}
@@ -251,11 +229,7 @@ if (playerIds.length > 0) {
               <p className="muted">Ve a Sesiones y crea una sesión para poder trabajar.</p>
             </Card>
           )}
-        </main>
-
-        <BottomNav role={role} tab={tab} setTab={setTab} />
-      </div>
-    </div>
+    </ApplicationShell>
   );
 }
 

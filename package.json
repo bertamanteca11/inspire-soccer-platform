@@ -7,7 +7,8 @@
     "build:check": "tsc --noEmit --incremental false && vite build --outDir .veo-build-check --emptyOutDir false",
     "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs",
     "test:phase4-ui": "playwright test -c tests/phase4.playwright.config.cjs",
-    "test:design-ui": "playwright test -c tests/design-system.playwright.config.cjs"
+    "test:design-ui": "playwright test -c tests/design-system.playwright.config.cjs",
+    "test:shell-ui": "playwright test -c tests/shell.playwright.config.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../supabase';
-import { Screen } from '../components/ui';
+import { LoginPanel } from '../components/shell/LoginPanel';
 
 export function LoginPage({ logoUrl }: { logoUrl: string }) {
   const [email, setEmail] = useState('');
@@ -21,5 +21,5 @@ export function LoginPage({ logoUrl }: { logoUrl: string }) {
     if (error) setError(error.message); else setMessage('Te hemos enviado un enlace de acceso al email.');
   }
 
-  return <Screen><div className="login-card"><img src={logoUrl} className="login-logo" alt="Inspire Soccer" /><h1>Inspire Soccer</h1><p>Accede para gestionar la plataforma del equipo.</p><div className="segmented"><button type="button" className={mode === 'password' ? 'selected' : ''} onClick={() => setMode('password')}>Contraseña</button><button type="button" className={mode === 'magic' ? 'selected' : ''} onClick={() => setMode('magic')}>Email link</button></div><form onSubmit={login} className="stack"><input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" required />{mode === 'password' && <input value={password} onChange={e => setPassword(e.target.value)} placeholder="Contraseña" type="password" required />}<button className="primary">{mode === 'password' ? 'Entrar' : 'Enviar enlace'}</button></form>{message && <p className="success">{message}</p>}{error && <p className="error">{error}</p>}</div></Screen>;
+  return <LoginPanel logoUrl={logoUrl} email={email} setEmail={setEmail} password={password} setPassword={setPassword} mode={mode} setMode={setMode} onSubmit={login} message={message} error={error}/>;
 }

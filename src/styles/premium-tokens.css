@@ -1,5 +1,5 @@
 /* Opt-in only. Never put these variables on :root or alias legacy tokens. */
-.premium-ui {
+.premium-ui, .club-shell, .club-login {
   --ds-navy: #122c55;
   --ds-primary: #245bb2;
   --ds-primary-hover: #194787;
