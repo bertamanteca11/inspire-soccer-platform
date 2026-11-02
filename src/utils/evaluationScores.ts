@@ -3,7 +3,9 @@ export const SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision
 export function isFieldNA(e: any, field: string): boolean { return Boolean(e?.not_applicable || e?.na_fields?.[field] === true); }
 export function fieldScore(e: any, field: string): number | null {
   if (!e || isFieldNA(e,field) || e[field] == null) return null;
-  const n=Number(e[field]); return Number.isFinite(n)?n:null;
+  const value = e[field];
+  if (typeof value !== 'number' && typeof value !== 'string' || typeof value === 'string' && !value.trim()) return null;
+  const n=Number(value); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
 }
 export function evaluationTotal(e: any): number | null {
   if (!e || e.not_applicable) return null;

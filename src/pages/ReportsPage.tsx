@@ -1,10 +1,11 @@
 import { ATTENDANCE_METRICS, attendanceStats } from '../utils/attendance';
-import { loadAttendanceStatistics } from '../lib/attendance';
 import { AttendanceBreakdown } from '../components/AttendanceBreakdown';
-import { officialEvaluations } from '../lib/performance';
-import { isOfficialPerformanceSession, OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
+import { loadPerformanceData, readPerformancePages } from '../lib/performance';
+import { isCompletedSportingSession, operationalStandouts } from '../utils/evaluationEligibility';
+import { copenhagenToday } from '../utils/copenhagenDates';
+import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {supabase} from '../supabase';
 import {Card,PageTitle} from '../components/ui';
 import { jsPDF } from 'jspdf';
@@ -12,89 +13,45 @@ import autoTable from 'jspdf-autotable';
 type Row=Record<string,any>;
 const esc=(x:any)=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]||c));
 export function ReportsPage(){
- const [players,setPlayers]=useState<Row[]>([]),[id,setId]=useState(''),[from,setFrom]=useState('2026-09-01'),[to,setTo]=useState(new Date().toISOString().slice(0,10)),[rows,setRows]=useState<Row[]>([]),[att,setAtt]=useState<Row[]>([]),[cards,setCards]=useState<Row[]>([]),[injuries,setInjuries]=useState<Row[]>([]),[standouts,setStandouts]=useState<Row[]>([]),[sessions,setSessions]=useState<Row[]>([]),[ready,setReady]=useState(false),[loading,setLoading]=useState(false),[message,setMessage]=useState('');
+ const [players,setPlayers]=useState<Row[]>([]),[id,setId]=useState(''),[from,setFrom]=useState('2026-09-01'),[to,setTo]=useState(copenhagenToday()),[rows,setRows]=useState<Row[]>([]),[att,setAtt]=useState<Row[]>([]),[cards,setCards]=useState<Row[]>([]),[injuries,setInjuries]=useState<Row[]>([]),[standouts,setStandouts]=useState<Row[]>([]),[sessions,setSessions]=useState<Row[]>([]),[ready,setReady]=useState(false),[loading,setLoading]=useState(false),[message,setMessage]=useState('');
  useEffect(()=>{supabase.from('players').select('*').order('display_name').then(({data,error})=>{setPlayers(data||[]);if(error)setMessage(error.message)})},[]);
+ const request=useRef(0);
+ function invalidate(){request.current++;setReady(false);setLoading(false);}
  async function run() {
+  const version=++request.current;
   setLoading(true);
   setReady(false);
   setMessage('');
 
   try {
-   const sessionResult = await supabase
-    .from('sessions')
-    .select('*')
-    .gte('session_date', from)
-    .lte('session_date', to)
-    .order('session_date');
-
-   if (sessionResult.error) throw sessionResult.error;
-
-   const selectedSessions: Row[] = sessionResult.data ?? [];
+   const performance = await loadPerformanceData();
+   if(version!==request.current)return;
+   const selectedSessions = performance.sessions.filter(s => isCompletedSportingSession(s) && s.session_date >= from && s.session_date <= to);
    setSessions(selectedSessions);
-
-   const sessionIds = selectedSessions.map(session => String(session.id));
-   const officialSessionIds = new Set<string>(
-    selectedSessions
-     .filter(isOfficialPerformanceSession)
-     .map(session => String(session.id))
-   );
-
-   // No consultamos tablas por session_id si no hay sesiones en el periodo.
-   const [evaluationsResult, attendanceResult, cardsResult, injuriesResult, standoutsResult] =
-    await Promise.all([
-     sessionIds.length
-      ? officialEvaluations().select('*').in('session_id', sessionIds)
-      : Promise.resolve({ data: [] as Row[], error: null }),
-     sessionIds.length
-      ? loadAttendanceStatistics({sessionIds})
-      : Promise.resolve({ data: [] as Row[], error: null }),
-     sessionIds.length
-      ? supabase.from('cards').select('*').in('session_id', sessionIds)
-      : Promise.resolve({ data: [] as Row[], error: null }),
-     supabase.from('injuries').select('*'),
-     sessionIds.length
-      ? supabase.from('session_standouts').select('*').in('session_id', sessionIds)
-      : Promise.resolve({ data: [] as Row[], error: null })
-    ]);
-
-   const queryError =
-    evaluationsResult.error ??
-    attendanceResult.error ??
-    cardsResult.error ??
-    injuriesResult.error ??
-    standoutsResult.error;
-
-   if (queryError) throw queryError;
-
-   const forSelectedPlayer = (items: Row[]): Row[] =>
-    items.filter(item => !id || item.player_id === id);
-
-   const validEvaluations: Row[] = (evaluationsResult.data ?? []).filter(
-    evaluation => officialSessionIds.has(String(evaluation.session_id))
-   );
-   const validStandouts: Row[] = (standoutsResult.data ?? []).filter(
-    standout => officialSessionIds.has(String(standout.session_id))
-   );
-
-   setRows(forSelectedPlayer(validEvaluations));
-   setStandouts(forSelectedPlayer(validStandouts));
-   setAtt(forSelectedPlayer(attendanceResult.data ?? []));
-   setCards(forSelectedPlayer(cardsResult.data ?? []));
-   setInjuries(forSelectedPlayer(
-    (injuriesResult.data ?? []).filter(injury =>
-     (!injury.start_date || injury.start_date <= to) &&
-     (!injury.end_date || injury.end_date >= from)
-    )
-   ));
+   const ids = new Set(selectedSessions.map(s => s.id));
+   const [cardRows, injuryRows, standoutRows] = await Promise.all([
+     readPerformancePages<Row>((a,b) => supabase.from('cards').select('*').order('id').range(a,b)),
+     readPerformancePages<Row>((a,b) => supabase.from('injuries').select('*').order('id').range(a,b)),
+     readPerformancePages<any>((a,b) => supabase.from('session_standouts').select('*').order('id').range(a,b)),
+   ]);
+   if(version!==request.current)return;
+   const scoped = (items: Row[]) => items.filter(r => ids.has(r.session_id) && (!id || r.player_id === id));
+   setRows(scoped(performance.evaluations));
+   setAtt(scoped(performance.attendance));
+   setCards(scoped(cardRows));
+   setStandouts(scoped(operationalStandouts(standoutRows,performance.sessions)));
+   setInjuries(injuryRows.filter(r => (!id || r.player_id === id) && (!r.start_date || r.start_date <= to) && (!r.end_date || r.end_date >= from)));
+   const excluded = performance.excluded.filter(e => ids.has(e.row.session_id) && (!id || e.row.player_id === id));
+   if(excluded.length) setMessage(excluded.length + ' evaluaciones fuera del computo por elegibilidad, duplicados o datos incompletos; originales conservados.');
    setReady(true);
   } catch (error) {
-   setMessage(error instanceof Error ? error.message : String(error));
+   if(version===request.current)setMessage(error instanceof Error ? error.message : String(error));
   } finally {
-   setLoading(false);
+   if(version===request.current)setLoading(false);
   }
  }
  const periodAttendance=attendanceStats(att);
- const evaluated=rows.filter(x=>x.evaluated && evaluationTotal(x) !== null);const mean=evaluated.length?evaluated.reduce((s,x)=>s+Number(evaluationTotal(x) ?? 0),0)/evaluated.length:0;
+ const evaluated=rows.filter(x=>x.evaluated && evaluationTotal(x) !== null);const mean=evaluated.length?evaluated.reduce((s,x)=>s+Number(evaluationTotal(x) ?? 0),0)/evaluated.length:null;
  const stats=(p:Row)=>{const e=rows.filter(x=>x.player_id===p.id&&x.evaluated&&evaluationTotal(x)!==null),a=att.filter(x=>x.player_id===p.id),c=cards.filter(x=>x.player_id===p.id),i=injuries.filter(x=>x.player_id===p.id),st=standouts.filter(x=>x.player_id===p.id);const attendance=attendanceStats(a);return {e:e.length,avg:e.length?(e.reduce((s,x)=>s+Number(evaluationTotal(x) ?? 0),0)/e.length).toFixed(2):'—',attendance,present:attendance.present,absences:attendance.absences,late:attendance.lateTotal,yellow:c.filter(x=>x.type==='yellow').length,red:c.filter(x=>['straight_red','double_yellow'].includes(x.type)).length,injuries:i.length,top:st.filter(x=>x.category==='top').length,bottom:st.filter(x=>x.category==='bottom').length}};
  function downloadPDF(){
   if(!ready)return;
@@ -152,4 +109,4 @@ export function ReportsPage(){
   }catch(err){setMessage(`No se ha podido generar el PDF: ${err instanceof Error?err.message:String(err)}`)}
  }
  const exportCSV=()=>{const lines=[['Jugador','Evaluaciones oficiales desde 2026-10-14','Media','Presencias','Ausencias','Retrasos','Amarillas','Rojas','Lesiones','Top','Bottom',...ATTENDANCE_METRICS.map(([,label])=>label)],...players.filter(p=>!id||p.id===id).map(p=>{const x=stats(p);return [p.display_name,x.e,x.avg,x.present,x.absences,x.late,x.yellow,x.red,x.injuries,x.top,x.bottom,...ATTENDANCE_METRICS.map(([metric])=>x.attendance[metric])]})];const csv=lines.map(row=>row.map(v=>'"'+String(v).replace(/"/g, '""')+'"').join(',')).join('\n');const a=document.createElement('a');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.href=url;a.download='inspire-report.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
- return <><PageTitle title="Informes" subtitle="Jugadores y equipo · periodos personalizados · PDF"/><Card><div className="stack"><label>Ámbito<select value={id} onChange={e=>{setId(e.target.value);setReady(false)}}><option value="">Equipo completo</option>{players.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);setReady(false)}}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);setReady(false)}}/></label><button className="primary" onClick={run} disabled={loading||from>to}>{loading?'Cargando…':'Generar informe'}</button></div></Card>{message&&<Card><p>{message}</p></Card>}{ready&&<Card><h3>Resumen del periodo</h3><p>Sesiones: {sessions.length} · Evaluaciones: {evaluated.length} · Media: {mean.toFixed(2)}</p><p>Asistencias registradas: {periodAttendance.recorded} · Ausencias: {periodAttendance.absences} · Retrasos: {periodAttendance.lateTotal}</p><AttendanceBreakdown rows={att}/><p>Tarjetas: {cards.length} · Lesiones: {injuries.length} · Standouts: {standouts.length}</p><button className="primary" onClick={downloadPDF}>Descargar PDF</button><button className="secondary" onClick={exportCSV}>Descargar CSV</button><p className="muted">{OFFICIAL_PERFORMANCE_LABEL}. Asistencia y demás registros: periodo seleccionado.</p><p className="muted">El PDF se descarga directamente. Los flags privados no se exportan.</p></Card>}</>}
+ return <><PageTitle title="Informes" subtitle="Jugadores y equipo · periodos personalizados · PDF"/><Card><div className="stack"><label>Ámbito<select value={id} onChange={e=>{setId(e.target.value);invalidate()}}><option value="">Equipo completo</option>{players.map(p=><option key={p.id} value={p.id}>{p.display_name}</option>)}</select></label><label>Desde<input type="date" value={from} onChange={e=>{setFrom(e.target.value);invalidate()}}/></label><label>Hasta<input type="date" value={to} onChange={e=>{setTo(e.target.value);invalidate()}}/></label><button className="primary" onClick={run} disabled={loading||from>to}>{loading?'Cargando…':'Generar informe'}</button></div></Card>{message&&<Card><p>{message}</p></Card>}{ready&&<Card><h3>Resumen del periodo</h3><p>Sesiones: {sessions.length} · Evaluaciones: {evaluated.length} · Media: {(mean === null ? 'N/A' : mean.toFixed(2))}</p><p>Asistencias registradas: {periodAttendance.recorded} · Ausencias: {periodAttendance.absences} · Retrasos: {periodAttendance.lateTotal}</p><AttendanceBreakdown rows={att}/><p>Tarjetas: {cards.length} · Lesiones: {injuries.length} · Standouts: {standouts.length}</p><button className="primary" onClick={downloadPDF}>Descargar PDF</button><button className="secondary" onClick={exportCSV}>Descargar CSV</button><p className="muted">{OFFICIAL_PERFORMANCE_LABEL}. Asistencia y demás registros: periodo seleccionado.</p><p className="muted">El PDF se descarga directamente. Los flags privados no se exportan.</p></Card>}</>}

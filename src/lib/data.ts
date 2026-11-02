@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import type { AppSession } from '../utils/appTypes';
+import { isActiveSession } from '../utils/sessionArchive';
 
 export async function getNextAvailableSession() {
   const today = new Date().toISOString().slice(0, 10);
@@ -12,7 +13,8 @@ export async function getNextAvailableSession() {
     .order('session_date', { ascending: true })
     .limit(20);
 
-  const futureSessions = (future.data || []) as AppSession[];
+  if (future.error) throw new Error(future.error.message);
+  const futureSessions = ((future.data || []) as AppSession[]).filter(isActiveSession);
 
   const openFuture =
     futureSessions.find(s => !s.callup_confirmed || !s.attendance_confirmed || !s.evaluation_confirmed) ||
@@ -27,23 +29,19 @@ export async function getNextAvailableSession() {
     .order('session_date', { ascending: false })
     .limit(1);
 
-  const latestSession = (latest.data || [])[0] as AppSession | undefined;
+  if (latest.error) throw new Error(latest.error.message);
+  const latestSession = ((latest.data || []) as AppSession[]).find(isActiveSession);
   if (latestSession) return latestSession;
 
-  const anySession = await supabase
-    .from('sessions')
-    .select('*')
-    .order('session_date', { ascending: false })
-    .limit(1);
-
-  return ((anySession.data || [])[0] as AppSession | undefined) || null;
+  return null;
 }
 
 export async function loadAllSessions() {
-  const { data } = await supabase
-    .from('sessions')
-    .select('*')
-    .order('session_date', { ascending: false });
-
-  return (data || []) as AppSession[];
+  const rows: AppSession[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase.from('sessions').select('*').order('id').range(offset, offset + 499);
+    if (error) throw new Error(error.message);
+    if (!data?.length) return rows.sort((a, b) => b.session_date.localeCompare(a.session_date) || a.id.localeCompare(b.id));
+    rows.push(...data as AppSession[]); offset += data.length;
+  }
 }

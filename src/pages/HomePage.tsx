@@ -1,9 +1,10 @@
 import { attendanceStats } from '../utils/attendance';
-import { officialEvaluations } from '../lib/performance';
+import { loadPerformanceData } from '../lib/performance';
+import { playerPerformanceAverages, eligibilityReason } from '../utils/evaluationEligibility';
 import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
 import { AlertTriangle, Trophy, Ban, ClipboardList, Shield, ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession, PlayerCardTotal, Tab } from '../utils/appTypes';
@@ -45,34 +46,33 @@ export function HomePage({
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
   const [suspensions, setSuspensions] = useState<any[]>([]);
 
-  const evaluatedCount = evaluations.filter((e: Evaluation) => e.evaluated && evaluationTotal(e) !== null).length;
+  const [sessionCounts, setSessionCounts] = useState({ id: '', evaluated: 0, eligible: 0 });
+  const performanceRequest = useRef(0);
+  const evaluatedCount = sessionCounts.id === selectedSession?.id ? sessionCounts.evaluated : 0;
   const cardWarnings = getCardWarnings(cardTotals).slice(0, 8);
   const sessionIsToday = nextSession?.session_date === new Date().toISOString().slice(0, 10);
   const recordsOnlyDone = Boolean((selectedSession as (AppSession & { records_only_confirmed?: boolean }) | null)?.records_only_confirmed);
-  const evaluationDone = !!selectedSession?.evaluation_confirmed || (players.length > 0 && evaluatedCount >= players.length);
+  const evaluationDone = !!selectedSession?.evaluation_confirmed || (sessionCounts.id === selectedSession?.id && sessionCounts.eligible > 0 && evaluatedCount >= sessionCounts.eligible);
 
   useEffect(() => {
     loadGlobalTops();
+    return () => { performanceRequest.current++; };
+  }, [selectedSession?.id]);
+  useEffect(() => {
     loadSuspensions();
   }, []);
 
   async function loadGlobalTops() {
-    const { data, error } = await officialEvaluations()
-      .select('player_id,total_score,not_applicable,na_fields,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,sessions(type,records_only_confirmed),players(display_name)')
-      .eq('evaluated', true);
-
-    if (error) { setPerformanceError(error.message); setTopMatches([]); setTopTrainings([]); return; }
-    setPerformanceError('');
-    const rows = (data || []).filter((r:any) =>
-      r.sessions && r.sessions.records_only_confirmed !== true && evaluationTotal(r) !== null
-    );
-    const matchRows = rows.filter((r: any) =>
-      ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(r.sessions?.type)
-    );
-    const trainingRows = rows.filter((r: any) => r.sessions?.type === 'training');
-
-    setTopMatches(buildTopRanking(matchRows));
-    setTopTrainings(buildTopRanking(trainingRows));
+    const request = ++performanceRequest.current;
+    try {
+      const result = await loadPerformanceData();
+      if (request !== performanceRequest.current) return;
+      const eligible = new Set(result.callups.filter(c => c.player_id && c.session_id && c.session_id === selectedSession?.id && !eligibilityReason(c.session_id,c.player_id,result.callups,result.attendance)).map(c => c.player_id));
+      setSessionCounts({ id: selectedSession?.id || '', evaluated: result.evaluations.filter(e => e.session_id === selectedSession?.id).length, eligible: eligible.size });
+      setPerformanceError(result.excluded.length ? result.excluded.length + ' evaluaciones excluidas por alcance, elegibilidad o datos incompletos; originales conservados.' : '');
+      setTopMatches(buildTopRanking(result.evaluations.filter(r => r.sessions.type !== 'training')));
+      setTopTrainings(buildTopRanking(result.evaluations.filter(r => r.sessions.type === 'training')));
+    } catch (failure) { if(request===performanceRequest.current){setPerformanceError(String(failure)); setTopMatches([]); setTopTrainings([]);setSessionCounts({id:'',evaluated:0,eligible:0});} }
   }
 
   async function loadSuspensions() {
@@ -168,13 +168,13 @@ export function HomePage({
         </div>
 
         <p className="muted">{OFFICIAL_PERFORMANCE_LABEL}</p>
-        {performanceError && <p role="alert">No se pudo cargar el rendimiento oficial: {performanceError}</p>}
+        {performanceError && <p role="alert">Rendimiento operativo: {performanceError}</p>}
         {activeTop.length > 0 ? (
           activeTop.map((p, index) => (
             <div className="top-row" key={p.id}>
               <span className="rank">#{index + 1}</span>
               <strong>{p.name}</strong>
-              <span>{p.average.toFixed(1)}</span>
+              <span>{p.average.toFixed(2)}</span>
             </div>
           ))
         ) : (
@@ -190,25 +190,5 @@ export function HomePage({
 }
 
 function buildTopRanking(rows: any[]) {
-  const grouped: Record<string, { name: string; scores: number[] }> = {};
-
-  rows.forEach((row: any) => {
-    if (!grouped[row.player_id]) {
-      grouped[row.player_id] = {
-        name: row.players?.display_name || 'Jugador',
-        scores: [],
-      };
-    }
-    grouped[row.player_id].scores.push(Number(evaluationTotal(row)));
-  });
-
-  return Object.entries(grouped)
-    .map(([id, item]) => ({
-      id,
-      name: item.name,
-      average: item.scores.reduce((a, b) => a + b, 0) / item.scores.length,
-      count: item.scores.length,
-    }))
-    .sort((a, b) => b.average - a.average)
-    .slice(0, 3);
+  return playerPerformanceAverages(rows).slice(0,3).map(p => ({ id: p.player_id, name: p.name, average: p.average, count: p.count }));
 }

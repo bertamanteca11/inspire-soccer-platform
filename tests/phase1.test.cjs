@@ -92,11 +92,14 @@ test('chart uses the same N/A-aware total as the profile, never stored total_sco
 test('performance queries are centralized; input and historical detail keep evaluations', () => {
   const read = file => fs.readFileSync(file, 'utf8');
   assert.match(read('src/lib/performance.ts'), /from\('official_evaluations'\)/);
-  for (const name of ['HomePage', 'PlayersPage', 'SummaryPage', 'ReportsPage', 'IntelligencePage']) {
+  for (const name of ['HomePage', 'PlayersPage', 'ReportsPage', 'IntelligencePage']) {
     const source = read(`src/pages/${name}.tsx`);
-    assert.match(source, /officialEvaluations\(\)/, name);
+    assert.match(source, /loadPerformanceData\(\)/, name);
     assert.doesNotMatch(source, /from\('evaluations'\)/, name);
   }
+  assert.match(read('src/pages/SummaryPage.tsx'), /loadSummaryData\(\)/);
+  assert.match(read('src/lib/summary.ts'), /loadPerformanceData\(\)/);
+  assert.doesNotMatch(read('src/lib/summary.ts'), /from\('evaluations'\)/);
   assert.match(read('src/pages/HistoryPage.tsx'), /from\('evaluations'\)/);
   assert.match(read('src/pages/EvaluationPage.tsx'), /from\('evaluations'\)/);
   assert.match(read('src/App.tsx'), /from\('evaluations'\)/);
@@ -228,7 +231,8 @@ test('statistics pages share classification and attendance reads have no perform
   assert.match(read('src/pages/IntelligencePage.tsx'), /isUnjustifiedAbsence\(a.status\)/);
   const loader = read('src/lib/attendance.ts');
   assert.doesNotMatch(loader, /official_evaluations|OFFICIAL_PERFORMANCE|callups|\.gte\(/);
-  for (const page of ['PlayersPage', 'SummaryPage', 'ReportsPage', 'HistoryPage', 'IntelligencePage']) {
+  for (const page of ['PlayersPage', 'HistoryPage']) {
     assert.match(read(`src/pages/${page}.tsx`), /loadAttendanceStatistics\(/, page);
   }
+  assert.match(read('src/lib/performance.ts'), /loadAttendanceStatistics\(\)/);
 });

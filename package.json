@@ -3,9 +3,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --test tests/phase1.test.cjs tests/veo.test.cjs tests/veo-analytics.test.cjs tests/veo-database.test.cjs",
+    "test": "node --test tests/phase1.test.cjs tests/phase4.test.cjs tests/session-archive.test.cjs tests/evaluation-correctness.test.cjs tests/veo.test.cjs tests/veo-analytics.test.cjs tests/veo-database.test.cjs",
     "build:check": "tsc --noEmit --incremental false && vite build --outDir .veo-build-check --emptyOutDir false",
-    "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs"
+    "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs",
+    "test:phase4-ui": "playwright test -c tests/phase4.playwright.config.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -1,12 +1,14 @@
 import { sortPlayersByJersey } from '../utils/playerOrder';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ChevronRight, RotateCcw, Search } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
 import { translatePosition } from '../utils/formatters';
 import { getRatingCounts } from '../utils/stats';
-import { isFieldNA, evaluationTotal } from '../utils/evaluationScores';
+import { isFieldNA, evaluationTotal, fieldScore } from '../utils/evaluationScores';
+import { eligibilityReason, distinctRows, isSportingActivity, newEvaluationDraft, ratingLimit, type EligibilityRow } from '../utils/evaluationEligibility';
+import { readPerformancePages } from '../lib/performance';
 import { Card } from '../components/ui';
 
 const matchRatingFields = [
@@ -38,6 +40,7 @@ const trainingRatingFields = [
     3: 'Compite con normalidad',
     5: 'Muy competitivo, motiva a los demás',
   }],
+  ['coachability', 'E. Capacidad de corrección (quinta calidad almacenada)'],
 ] as const;
 
 const cardOptions = [
@@ -47,7 +50,7 @@ const cardOptions = [
   ['straight_red', 'Roja directa'],
 ] as const;
 
-const DEFAULT_SCORE = 3;
+
 const ALL_SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'] as const;
 
 
@@ -79,17 +82,23 @@ export function EvaluationPage({
   const [cardDrafts, setCardDrafts] = useState<Record<string, {type:string;reason:string;matches:string}>>({});
   const [localEvaluations, setLocalEvaluations] = useState<Evaluation[]>(evaluations || []);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [callups, setCallups] = useState<EligibilityRow[]>([]);
+  const [eligibilityLoading, setEligibilityLoading] = useState(true);
+  const [eligibilityError, setEligibilityError] = useState('');
+  const eligibilityRequest = useRef(0);
   const [localLocked, setLocalLocked] = useState(!!session.evaluation_confirmed);
   const [adminRecordsMode, setAdminRecordsMode] = useState(false);
   const [roster, setRoster] = useState<Player[]>([]);
   const [recordIndex, setRecordIndex] = useState(0);
   const [recordSaving, setRecordSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmationPending = useRef(false);
 
   const locked = localLocked;
   const recordsOnlyCompleted = Boolean((session as AppSession & { records_only_confirmed?: boolean }).records_only_confirmed);
   const isAdmin = role === 'admin';
 
-  useEffect(() => { setLocalEvaluations(evaluations || []); }, [evaluations, session.id]);
+  useEffect(() => { setLocalEvaluations((evaluations || []).filter(e => e.session_id === session.id)); }, [evaluations, session.id]);
   useEffect(() => { setComments({}); setDirtyComments({}); setCardDrafts({}); }, [session.id]);
   // Initialize comments without overwriting edits or recently saved text with stale props.
   useEffect(() => {
@@ -102,8 +111,8 @@ export function EvaluationPage({
     });
   }, [localEvaluations]);
   useEffect(() => { void loadCards(); }, [session.id]);
-  useEffect(() => setLocalLocked(!!session.evaluation_confirmed), [session.evaluation_confirmed]);
-  useEffect(() => { loadAttendance(); }, [session.id]);
+  useEffect(() => setLocalLocked(!!session.evaluation_confirmed), [session.id, session.evaluation_confirmed]);
+  useEffect(() => { void loadAttendance(); return () => { eligibilityRequest.current++; }; }, [session.id]);
   useEffect(() => { setAdminRecordsMode(false); setRecordIndex(0); }, [session.id]);
   useEffect(() => {
     if (!isAdmin || !adminRecordsMode) return;
@@ -137,16 +146,24 @@ export function EvaluationPage({
   }
 
   async function loadAttendance() {
-    const { data } = await supabase.from('attendance').select('*').eq('session_id', session.id);
-    setAttendance(data || []);
+    const request = ++eligibilityRequest.current;
+    setEligibilityLoading(true); setEligibilityError(''); setAttendance([]); setCallups([]);
+    try {
+      const [visits, calls] = await Promise.all([
+        readPerformancePages<Attendance>((a,b) => supabase.from('attendance').select('*').eq('session_id',session.id).order('id').range(a,b)),
+        readPerformancePages<EligibilityRow>((a,b) => supabase.from('callups').select('*').eq('session_id',session.id).order('id').range(a,b)),
+      ]);
+      if (request === eligibilityRequest.current) { setAttendance(visits); setCallups(calls); }
+    } catch (failure) { if (request === eligibilityRequest.current) setEligibilityError(String(failure)); }
+    finally { if (request === eligibilityRequest.current) setEligibilityLoading(false); }
   }
 
   const evaluablePlayers = useMemo(() => {
     return sortPlayersByJersey(players).filter((p: Player) => {
-      const att = attendance.find((a: Attendance) => a.player_id === p.id);
-      return !!att && ['present','late','justified_late'].includes(att.status);
+      return !eligibilityReason(session.id,p.id,callups,attendance)
+        && distinctRows(localEvaluations).filter(e => e.session_id === session.id && e.player_id === p.id).length <= 1;
     });
-  }, [players, attendance]);
+  }, [players, attendance, callups, session.id, localEvaluations]);
 
   const player = evaluablePlayers[index] || evaluablePlayers[0];
   const ev = localEvaluations.find((e: Evaluation) => e.player_id === player?.id);
@@ -158,7 +175,7 @@ export function EvaluationPage({
   function setCardDraft(playerId: string, patch: Partial<{type:string;reason:string;matches:string}>) {
     setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || {type:'none',reason:'',matches:'1'}), ...patch}}));
   }
-  const counters = useMemo(() => getRatingCounts(localEvaluations), [localEvaluations]);
+  const counters = useMemo(() => getRatingCounts(distinctRows(localEvaluations).filter(e => evaluablePlayers.some(p => p.id === e.player_id))), [localEvaluations,evaluablePlayers]);
   const recordPlayers = sortPlayersByJersey(roster);
   const recordPlayer = recordPlayers[recordIndex];
   const recordCard = savedCards.find(c => c.player_id === recordPlayer?.id);
@@ -170,15 +187,21 @@ export function EvaluationPage({
 
   if (!session.callup_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la convocatoria.</p></Card></div>;
   if (!session.attendance_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la asistencia. Así los ausentes quedan fuera de evaluación y no cuentan en las medias.</p></Card></div>;
-  if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>Los jugadores ausentes no aparecen en evaluación ni cuentan en las medias.</p></Card></div>;
+  if (eligibilityLoading) return <Card><p role="status">Verificando convocatoria y asistencia…</p></Card>;
+  if (role !== 'admin' && role !== 'coach') return <Card><p>Solo lectura: consulta las evaluaciones en Resumen o Historial.</p></Card>;
+  if (eligibilityError) return <Card><p role="alert">No se pudo verificar la elegibilidad: {eligibilityError}</p></Card>;
+  if (!isSportingActivity(session) || !['planned','completed'].includes(session.status)) return <Card><p role="alert">Esta sesión no admite evaluación operativa. Sus registros se conservan en el historial.</p></Card>;
+  if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>No hay participantes con elegibilidad verificable. Revisa convocatoria, asistencia y posibles evaluaciones duplicadas. Los originales se conservan.</p></Card></div>;
 
   async function ensureEval(target: Player = player): Promise<Evaluation | null> {
+    if (!adminRecordsMode && eligibilityReason(session.id,target.id,callups,attendance)) { setError('No se ha verificado la elegibilidad del jugador.'); return null; }
+    if (distinctRows(localEvaluations).filter(e => e.player_id === target.id).length > 1) { setError('Evaluaciones duplicadas: revisar registros originales.'); return null; }
     const existing = localEvaluations.find(e => e.player_id === target.id);
     if (existing) return existing;
 
     const { data, error } = await supabase
       .from('evaluations')
-      .insert({ session_id: session.id, player_id: target.id, ...(adminRecordsMode ? {not_applicable:true} : {}) })
+      .insert({ session_id: session.id, player_id: target.id, ...newEvaluationDraft(), ...(adminRecordsMode ? {not_applicable:true} : {}) })
       .select('*')
       .single();
 
@@ -192,18 +215,20 @@ export function EvaluationPage({
   }
 
   async function update(field: string, value: number | string | boolean, target: Player = player) {
-    if (locked) return false;
+    if (locked || confirmationPending.current) return false;
     setError('');
 
-    const currentValue = Number((localEvaluations.find(e => e.player_id === target.id) as any)?.[field]);
-    const highLimit = session.high_rating_limit || 6;
-    const lowLimit = session.low_rating_limit || 3;
+    const currentValue = fieldScore(localEvaluations.find(e => e.player_id === target.id),field);
+    let highLimit: number, lowLimit: number;
+    try { highLimit = ratingLimit(session.high_rating_limit,6); lowLimit = ratingLimit(session.low_rating_limit,3); }
+    catch (failure) { setError(String(failure)); return false; }
 
     if (typeof value === 'number') {
+      if (!Number.isInteger(value) || value < 1 || value > 5) return false;
       const isNewHigh = value >= 4;
-      const wasHigh = currentValue >= 4;
+      const wasHigh = currentValue !== null && currentValue >= 4;
       const isNewLow = value <= 2;
-      const wasLow = currentValue > 0 && currentValue <= 2;
+      const wasLow = currentValue !== null && currentValue <= 2;
 
       if (isNewHigh && !wasHigh && counters.high[field] >= highLimit) {
         const msg = 'Has llegado al máximo de jugadores con puntuación alta en esta categoría. Cambia una evaluación anterior para continuar.';
@@ -223,7 +248,7 @@ export function EvaluationPage({
     // Both values are saved in one request so they cannot become inconsistent.
     const previous = localEvaluations.find(e => e.player_id === target.id) as any;
     const patch = ALL_SCORE_FIELDS.includes(field as any)
-      ? { [field]: value, na_fields: {...(previous?.na_fields || {}), [field]: false}, submitted_at: new Date().toISOString() }
+      ? { [field]: value, not_applicable: false, na_fields: {...((previous || record)?.na_fields || {}), [field]: false}, submitted_at: new Date().toISOString() }
       : { [field]: value, submitted_at: new Date().toISOString() };
     const { data, error } = await supabase
       .from('evaluations')
@@ -241,12 +266,12 @@ export function EvaluationPage({
   }
 
   async function setQualityNA(field: string, target: Player = player) {
-    if (locked) return false;
+    if (locked || confirmationPending.current) return false;
     setError('');
     const record = await ensureEval(target);
     if (!record) return false;
     const flags = {...((record as any).na_fields || {})};
-    flags[field] = !isFieldNA(record, field);
+    flags[field] = true; // Only a numeric selection can restore a numeric value.
     const {data, error} = await supabase.from('evaluations')
       .update({na_fields:flags, submitted_at:new Date().toISOString()})
       .eq('id',record.id).select('*').single();
@@ -363,18 +388,21 @@ export function EvaluationPage({
   }
 
   async function previous() {
+    if (confirmationPending.current) return;
     if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
     setIndex(i => (i - 1 + evaluablePlayers.length) % evaluablePlayers.length);
   }
 
   async function goToPlayer(nextIndex: number) {
+    if (confirmationPending.current) return;
     if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
     setIndex(nextIndex);
   }
 
   async function next() {
+    if (confirmationPending.current) return;
     if (!await saveComment(player)) return;
     if (!await saveCardIfNeeded(player)) return;
     // Navigation must never finalize an evaluation; only Confirm does that.
@@ -420,54 +448,41 @@ export function EvaluationPage({
   }
 
   async function confirmEvaluation() {
-    if (recordsOnlyCompleted) return;
-    const confirmed = window.confirm('¿Confirmar evaluación? El coach no podrá modificarla después.');
-    if (!confirmed) return;
-
-    for (const target of evaluablePlayers) if (!await saveCardIfNeeded(target)) return;
-    if (!await saveComment(player)) return;
-    // Persist the displayed default 3 for every eligible player before locking.
-    // Never overwrite existing scores (including values 1, 2, 4 or 5).
+    if (recordsOnlyCompleted || locked || confirmationPending.current || eligibilityLoading || eligibilityError) return;
+    if (!window.confirm('Confirmar evaluacion con las puntuaciones explicitas y N/A revisados?')) return;
+    confirmationPending.current = true; setConfirming(true);
     setError('');
-    const { data: latest, error: readError } = await supabase.from('evaluations').select('*').eq('session_id', session.id);
-    if (readError) { setError('No se pudieron revisar las evaluaciones: ' + readError.message); return; }
-    const existingByPlayer = new Map((latest || []).map((record: any) => [record.player_id, record]));
-    for (const target of evaluablePlayers) {
-      const existing = existingByPlayer.get(target.id) as any;
-      if (existing?.not_applicable) {
-        if (!existing.evaluated) {
-          const { error } = await supabase.from('evaluations').update({evaluated:true}).eq('id',existing.id);
-          if (error) { setError(error.message); return; }
-        }
-        continue;
+    try {
+      const [latest,calls,visits] = await Promise.all([
+        readPerformancePages<Evaluation>((a,b)=>supabase.from('evaluations').select('*').eq('session_id',session.id).order('id').range(a,b)),
+        readPerformancePages<EligibilityRow>((a,b)=>supabase.from('callups').select('*').eq('session_id',session.id).order('id').range(a,b)),
+        readPerformancePages<Attendance>((a,b)=>supabase.from('attendance').select('*').eq('session_id',session.id).order('id').range(a,b)),
+      ]);
+      const eligibleNow = players.filter(p => !eligibilityReason(session.id,p.id,calls,visits));
+      if (!eligibleNow.length || eligibleNow.length !== evaluablePlayers.length || eligibleNow.some(p=>!evaluablePlayers.some(old=>old.id===p.id))) throw new Error('La elegibilidad ha cambiado. Recarga y revisa antes de confirmar.');
+      const reviewed: Evaluation[] = [];
+      for (const target of eligibleNow) {
+        const rows = distinctRows(latest).filter(e=>e.player_id===target.id);
+        if(rows.length!==1) throw new Error(target.display_name+': falta una evaluacion explicita o hay registros duplicados.');
+        const row=rows[0];
+        if(!row.not_applicable && ALL_SCORE_FIELDS.some(field=>!isFieldNA(row,field)&&fieldScore(row,field)===null)) throw new Error(target.display_name+': revisa las cualidades sin puntuacion valida ni N/A.');
+        reviewed.push(row);
       }
-      const defaults: Record<string, number> = {};
-      for (const field of ALL_SCORE_FIELDS) {
-        if (existing?.[field] == null) defaults[field] = DEFAULT_SCORE;
+      const counts=getRatingCounts(reviewed), high=ratingLimit(session.high_rating_limit,6), low=ratingLimit(session.low_rating_limit,3);
+      if(ALL_SCORE_FIELDS.some(field=>(counts.high[field]||0)>high||(counts.low[field]||0)>low)) throw new Error('Los limites de puntuacion requieren revision antes de confirmar.');
+      for(const target of eligibleNow) if(!await saveCardIfNeeded(target))return;
+      if(!await saveComment(player))return;
+      for(const row of reviewed) if(!row.evaluated){
+        const result=await supabase.from('evaluations').update({evaluated:true}).eq('id',row.id).select('*').single();
+        if(result.error || result.data?.id!==row.id) throw new Error(result.error?.message||'No se verifico la evaluacion guardada.');
       }
-      if (!existing) {
-        const { error } = await supabase.from('evaluations').insert({session_id:session.id, player_id:target.id, ...defaults, evaluated:true});
-        if (error) { setError('No se pudo guardar la evaluación de ' + target.display_name + ': ' + error.message); return; }
-      } else if (Object.keys(defaults).length || !existing.evaluated) {
-        const { error } = await supabase.from('evaluations').update({...defaults, evaluated:true}).eq('id', existing.id);
-        if (error) { setError('No se pudo completar la evaluación de ' + target.display_name + ': ' + error.message); return; }
-      }
-    }
-    await supabase.rpc('create_yellow_accumulation_suspensions');
-
-    const { error } = await supabase
-      .from('sessions')
-      .update({ evaluation_confirmed: true, evaluation_confirmed_at: new Date().toISOString() })
-      .eq('id', session.id);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    setLocalLocked(true);
-    if (moveToNextOpenSession) await moveToNextOpenSession();
-    else await reload(session.id);
+      await supabase.rpc('create_yellow_accumulation_suspensions'); // Preserve the existing disciplinary workflow.
+      const result=await supabase.from('sessions').update({evaluation_confirmed:true,evaluation_confirmed_at:new Date().toISOString()}).eq('id',session.id).eq('status',session.status).select('id').single();
+      if(result.error || result.data?.id!==session.id) throw new Error(result.error?.message||'No se verifico la confirmacion de sesion.');
+      setLocalLocked(true);
+      if(moveToNextOpenSession)await moveToNextOpenSession();else await reload(session.id);
+    } catch(failure){setError(String(failure));}
+    finally { confirmationPending.current = false; setConfirming(false); }
   }
 
   async function reopenEvaluation() {
@@ -486,14 +501,18 @@ export function EvaluationPage({
     await reload(session.id);
   }
 
-  const current: any = ev || { tactical_discipline: 3, effort_commitment: 3, decision_making: 3, mentality_attitude: 3, coachability: 3, comment: '' };
+  const current: any = ev || {};
   const isMatch = ['friendly_match', 'league_match', 'tryout', 'scrimmage'].includes(session.type);
   const activeRatingFields = session.type === 'training' ? trainingRatingFields : matchRatingFields;
-  const highLimit = session.high_rating_limit || 6;
-  const lowLimit = session.low_rating_limit || 3;
+  const highLimit = session.high_rating_limit ?? 6;
+  const lowLimit = session.low_rating_limit ?? 3;
 
   return (
     <div className="stack">
+      <Card><p>Solo se evalúa a jugadores convocados y evaluables con asistencia deportiva registrada. Las puntuaciones no seleccionadas no reciben un 3 automático.</p>
+        {session.type === 'training' && <p>Se muestran las cinco calidades de la fórmula almacenada. La regla de cuatro o cinco cualidades de entreno sigue pendiente de confirmación; no se reescriben notas históricas.</p>}
+        {!!localEvaluations.filter(e => !evaluablePlayers.some(p => p.id === e.player_id)).length && <p role="alert">Hay evaluaciones no elegibles o duplicadas fuera del cómputo. Se conservan para revisión histórica.</p>}
+      </Card>
       {isAdmin && locked && !recordsOnlyCompleted && <Card>
         <p className="muted">Si este es un partido histórico sin puntuaciones, pulsa «Reabrir evaluación» para acceder a «Solo registros». Reabrir no borra comentarios, tarjetas, asistencia ni N/A.</p>
       </Card>}
@@ -501,11 +520,11 @@ export function EvaluationPage({
         <p className="kicker">Evaluación</p>
         <h2>{session.name}</h2>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,padding:5,marginTop:16,background:'#e4e7e3',borderRadius:18}}>
-          <button type="button" onClick={() => { if (recordPlayer && dirtyComments[recordPlayer.id]) { setError('Guarda el comentario antes de cambiar de modo.'); return; } setAdminRecordsMode(false); }}
+          <button type="button" disabled={confirming} onClick={() => { if (recordPlayer && dirtyComments[recordPlayer.id]) { setError('Guarda el comentario antes de cambiar de modo.'); return; } setAdminRecordsMode(false); }}
             style={{border:'none',borderRadius:13,padding:'12px 8px',fontWeight:700,cursor:'pointer',background:!adminRecordsMode?'#efffbb':'transparent',color:'#111'}}>
             Evaluación deportiva
           </button>
-          <button type="button" onClick={() => setAdminRecordsMode(true)}
+          <button type="button" disabled={confirming} onClick={() => setAdminRecordsMode(true)}
             style={{border:'none',borderRadius:13,padding:'12px 8px',fontWeight:700,cursor:'pointer',background:adminRecordsMode?'#efffbb':'transparent',color:'#111'}}>
             Solo registros (sin puntuación)
           </button>
@@ -565,7 +584,7 @@ export function EvaluationPage({
             {isAdmin && <button className="secondary danger" onClick={reopenEvaluation}><RotateCcw size={16} /> Reabrir evaluación</button>}
           </div>
         ) : (
-          <button className="primary" onClick={confirmEvaluation}>Confirmar evaluación</button>
+          <button className="primary" disabled={confirming} onClick={confirmEvaluation}>{confirming ? 'Verificando evaluación…' : 'Confirmar evaluación'}</button>
         )}
       </Card>
 
@@ -573,7 +592,7 @@ export function EvaluationPage({
       <Card><div className="row"><strong>Orden de evaluación</strong><select aria-label="Orden de evaluación" value={mode} onChange={e => setMode(e.target.value as 'category'|'player')}><option value="category">Por cualidad (todos los jugadores)</option><option value="player">Por jugador (todas las cualidades)</option></select></div></Card>
       {mode === 'category' ? <>
         <Card><strong>Cualidad que estás evaluando</strong><select value={categoryIndex} onChange={e => setCategoryIndex(Number(e.target.value))}>{(session.type === 'training' ? trainingRatingFields : matchRatingFields).map(([field,label],i) => <option key={field} value={i}>{label}</option>)}</select></Card>
-        {(session.type === 'training' ? trainingRatingFields : matchRatingFields).slice(categoryIndex,categoryIndex+1).map(([field,label]) => <Card key={field}><h2>{label}</h2><p className="muted">Valora esta cualidad en todos los jugadores antes de pasar a la siguiente.</p>{evaluablePlayers.map(p => {const rating = localEvaluations.find(e => e.player_id === p.id); const na=isFieldNA(rating, field); return <div key={p.id} className="rating-player-row"><strong>{p.display_name}</strong><div className="rating">{[1,2,3,4,5].map(n => <button key={n} disabled={locked} className={!na && ((rating as any)?.[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field,n,p)}>{n}</button>)}<button disabled={locked} className={na ? 'rate active' : 'rate'} onClick={() => setQualityNA(field,p)}>N/A</button></div></div>})}</Card>)}
+        {(session.type === 'training' ? trainingRatingFields : matchRatingFields).slice(categoryIndex,categoryIndex+1).map(([field,label]) => <Card key={field}><h2>{label}</h2><p className="muted">Valora esta cualidad en todos los jugadores antes de pasar a la siguiente.</p>{evaluablePlayers.map(p => {const rating = localEvaluations.find(e => e.player_id === p.id); const na=isFieldNA(rating, field); return <div key={p.id} className="rating-player-row"><strong>{p.display_name}</strong><div className="rating">{[1,2,3,4,5].map(n => <button key={n} disabled={locked || confirming} className={!na && fieldScore(rating,field) === n ? 'rate active' : 'rate'} onClick={() => update(field,n,p)}>{n}</button>)}<button disabled={locked || confirming} className={na ? 'rate active' : 'rate'} onClick={() => setQualityNA(field,p)}>N/A</button></div></div>})}</Card>)}
         <div className="row"><button className="secondary" disabled={categoryIndex===0} onClick={()=>setCategoryIndex(i=>i-1)}>Cualidad anterior</button><button className="primary" onClick={()=>{if(categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1)setCategoryIndex(i=>i+1);else setMode('player')}}>{categoryIndex < (session.type==='training'?trainingRatingFields:matchRatingFields).length-1 ? 'Siguiente cualidad' : 'Revisar comentarios'}</button></div>
       </> : <>
       <div className="progress">{index + 1} / {evaluablePlayers.length}</div>
@@ -590,7 +609,7 @@ export function EvaluationPage({
           <div><p className="kicker">Jugador</p><h2>{player.display_name}</h2><p>{translatePosition(player.position)}</p></div>
           <div className="score-badge">{evaluationTotal(current) ?? 'N/A'}</div>
         </div>
-        <div className="row" style={{marginTop:12}}><button className="secondary" disabled={locked} onClick={previous}>← Anterior</button><button className="primary" disabled={locked} onClick={next}>Siguiente jugador →</button></div>
+        <div className="row" style={{marginTop:12}}><button className="secondary" disabled={locked || confirming} onClick={previous}>← Anterior</button><button className="primary" disabled={locked || confirming} onClick={next}>Siguiente jugador →</button></div>
       </Card>
 
       {activeRatingFields.map(([field, label, description]) => (
@@ -611,9 +630,9 @@ export function EvaluationPage({
           </div>
           <div className="rating">
             {[1, 2, 3, 4, 5].map(n => (
-              <button disabled={locked} key={n} className={!isFieldNA(current,field) && (current[field] ?? DEFAULT_SCORE) === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
+              <button disabled={locked || confirming} key={n} className={!isFieldNA(current,field) && fieldScore(current,field) === n ? 'rate active' : 'rate'} onClick={() => update(field, n)}>{n}</button>
             ))}
-            <button disabled={locked} className={isFieldNA(current,field) ? 'rate active' : 'rate'} onClick={() => setQualityNA(field)}>N/A</button>
+            <button disabled={locked || confirming} className={isFieldNA(current,field) ? 'rate active' : 'rate'} onClick={() => setQualityNA(field)}>N/A</button>
           </div>
         </Card>
       ))}
@@ -621,17 +640,17 @@ export function EvaluationPage({
       {isMatch && (
         <Card>
           <strong>Tarjetas</strong>
-          <select disabled={locked || savingCard} value={cardType} onChange={e => setCardDraft(player.id, {type:e.target.value})}>
+          <select disabled={locked || confirming || savingCard} value={cardType} onChange={e => setCardDraft(player.id, {type:e.target.value})}>
             {cardOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
 
           <p className="muted">Tarjeta registrada para {player.display_name}: {savedCards.filter(c=>c.player_id===player.id).map(c=>c.type==='yellow'?'🟨 Amarilla':'🟥 '+(c.type==='double_yellow'?'Doble amarilla':'Roja')).join(' · ') || 'Ninguna'}</p>
           {cardType !== 'none' && (
             <>
-              <textarea disabled={locked} placeholder="Motivo de la tarjeta..." value={cardReason} onChange={e => setCardDraft(player.id, {reason:e.target.value})} />
+              <textarea disabled={locked || confirming} placeholder="Motivo de la tarjeta..." value={cardReason} onChange={e => setCardDraft(player.id, {reason:e.target.value})} />
               {(cardType === 'straight_red' || cardType === 'double_yellow') && (
                 <input
-                  disabled={locked}
+                  disabled={locked || confirming}
                   type="number"
                   min="1"
                   placeholder="Partidos de sanción"
@@ -647,13 +666,13 @@ export function EvaluationPage({
 
       <Card key={'comment-'+player.id}>
         <strong>Comentario de {player.display_name}</strong>
-        <textarea disabled={locked} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true})); setSavedNotice('');}} placeholder="Comentario individual..." />
+        <textarea disabled={locked || confirming} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true})); setSavedNotice('');}} placeholder="Comentario individual..." />
         <p className="muted">El comentario se guarda al cambiar de jugador o al confirmar la evaluación.</p>
       </Card>
 
       <div className="row" style={{justifyContent:'space-between', gap:12}}>
-        <button className="secondary" disabled={locked} onClick={previous}>← Jugador anterior</button>
-        <button className="primary" disabled={locked} onClick={next}>Siguiente jugador <ChevronRight size={18} /></button>
+        <button className="secondary" disabled={locked || confirming} onClick={previous}>← Jugador anterior</button>
+        <button className="primary" disabled={locked || confirming} onClick={next}>Siguiente jugador <ChevronRight size={18} /></button>
       </div>
       </>}
       </>}

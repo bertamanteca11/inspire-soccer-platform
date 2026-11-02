@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { loadAllSessions } from '../lib/data';
+import { isCompletedSportingSession, distinctRows } from '../utils/evaluationEligibility';
 import { Award, TrendingDown, Save } from 'lucide-react';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
@@ -20,29 +22,38 @@ export function StandoutsPage({ role }: { role: Role }) {
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [message,setMessage]=useState('');
+  const [sessionLoading,setSessionLoading]=useState(false);
+  const sessionRequest=useRef(0);
   const canEdit=role==='admin';
 
   useEffect(()=>{ loadSessions(); },[]);
-  useEffect(()=>{ if(sessionId) loadSession(sessionId); },[sessionId]);
+  useEffect(()=>{ if(sessionId) void loadSession(sessionId);return()=>{sessionRequest.current++}; },[sessionId]);
 
   async function loadSessions(){
     setLoading(true);
-    const {data}=await supabase.from('sessions').select('*').order('session_date',{ascending:false});
-    const rows=(data||[]) as StandoutSession[];
-    setSessions(rows);
-    if(rows[0]) setSessionId(rows[0].id);
+    try {
+      const rows=(await loadAllSessions()).filter(isCompletedSportingSession);
+      setSessions(rows); setSessionId(rows[0]?.id || '');
+    } catch(failure){setSessions([]);setSessionId('');setMessage(String(failure));}
     setLoading(false);
   }
   async function loadSession(id:string){
-    setMessage('');
+    const request=++sessionRequest.current;setSessionLoading(true);setMessage('');setPlayers([]);setPicks({...emptyPicks});
     const [callups,standouts]=await Promise.all([
       supabase.from('callups').select('player_id,status,players(*)').eq('session_id',id).neq('status','not_called').order('created_at'),
       supabase.from('session_standouts').select('*').eq('session_id',id)
     ]);
+    if(request!==sessionRequest.current)return;
+    setSessionLoading(false);
+    if(callups.error || standouts.error){setMessage(callups.error?.message||standouts.error?.message||'Error de lectura');setPlayers([]);setPicks({...emptyPicks});return;}
     const ps=((callups.data||[]) as any[]).map(r=>r.players).filter(Boolean) as Player[];
     setPlayers(ps);
     const next={...emptyPicks}; let sessionNotes='';
-    for(const row of (standouts.data||[]) as any[]){
+    const stored=distinctRows((standouts.data||[]) as any[]);
+    if(stored.some(row=>stored.filter(other=>other.player_id===row.player_id || other.category===row.category&&other.rank===row.rank).length>1)){
+      setMessage('Destacados duplicados: revisar los registros originales antes de editar.');setPlayers([]);setPicks({...emptyPicks});return;
+    }
+    for(const row of stored){
       if(row.category==='top' && row.rank===1) next.top_1=row.player_id;
       if(row.category==='top' && row.rank===2) next.top_2=row.player_id;
       if(row.category==='bottom' && row.rank===1) next.bottom_1=row.player_id;
@@ -57,12 +68,13 @@ export function StandoutsPage({ role }: { role: Role }) {
     setMessage(''); setPicks(prev=>({...prev,[slot]:value}));
   }
   async function save(){
-    if(!canEdit) return;
+    if(!canEdit || sessionLoading) return;
     if(sessions.find(s=>s.id===sessionId)?.records_only_confirmed === true){
       setMessage('Esta sesión es Solo registros: no se pueden guardar Top/Bottom.');
       return;
     }
     const values=Object.values(picks);
+    if(values.some(id=>id&&!players.some(p=>p.id===id))){setMessage('Revisa las identidades de los destacados antes de guardar.');return;}
     if(values.some(v=>!v)){ setMessage('Selecciona los 2 top performers y los 2 bottom performers.'); return; }
     if(new Set(values).size!==4){ setMessage('Selecciona cuatro jugadores diferentes.'); return; }
     setSaving(true); setMessage('');
@@ -78,11 +90,12 @@ export function StandoutsPage({ role }: { role: Role }) {
     setMessage(ins.error?ins.error.message:'Standouts guardados correctamente.'); setSaving(false);
   }
   const current=sessions.find(s=>s.id===sessionId);
-  const readOnly = !canEdit || current?.records_only_confirmed === true;
+  const readOnly = !canEdit || sessionLoading || current?.records_only_confirmed === true;
   const playerName=(id:string)=>players.find(p=>p.id===id)?.display_name||'—';
   if(loading) return <Card><p>Cargando sesiones...</p></Card>;
   return <div className="stack">
     <PageTitle title="Session Standouts" subtitle="Selección subjetiva del staff después de cada entreno o partido." />
+    <p>Estos puestos son elecciones subjetivas del staff, no medias calculadas. Las ausencias y la elegibilidad numérica se verifican por separado; solo las sesiones completadas y reales contribuyen al seguimiento operativo.</p>
     <select value={sessionId} onChange={e=>setSessionId(e.target.value)}>{sessions.map(s=><option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)}</option>)}</select>
     {current && <Card className="standout-session"><p className="kicker">Sesión seleccionada</p><h2>{current.name}</h2><p>{formatDate(current.session_date)} · {current.type==='training'?'Entrenamiento':'Partido / sesión'}</p></Card>}
     {current?.records_only_confirmed === true && <Card><p>Esta sesión está confirmada como «Solo registros». No se pueden editar ni guardar Top/Bottom.</p></Card>}

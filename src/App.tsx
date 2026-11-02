@@ -6,6 +6,7 @@ import type { Attendance, Evaluation, Player, Role } from './types';
 import type { AppSession, PlayerCardTotal, Tab } from './utils/appTypes';
 import { buildSessionLabel } from './utils/formatters';
 import { getNextAvailableSession } from './lib/data';
+import { ACTIVE_SESSION_STATUSES, isActiveSession } from './utils/sessionArchive';
 import { BottomNav } from './components/BottomNav';
 import { Card, Screen } from './components/ui';
 import { LoginPage } from './pages/LoginPage';
@@ -78,6 +79,7 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
   const [cardTotals, setCardTotals] = useState<PlayerCardTotal[]>([]);
   const [error, setError] = useState('');
   const [loadingData, setLoadingData] = useState(true);
+  const [summarySessionId, setSummarySessionId] = useState('');
 
   const isAdmin = role === 'admin';
   const isCoach = role === 'coach';
@@ -86,15 +88,21 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
     setLoadingData(true);
     setError('');
 
-    const next = await getNextAvailableSession();
+    let next: AppSession | null;
+    try { next = await getNextAvailableSession(); }
+    catch (failure) {
+      setError('No se pudo cargar la sesión operativa: ' + String(failure));
+      setNextSession(null); setSelectedSession(null); setPlayers([]); setAttendance([]); setEvaluations([]); setCardTotals([]); setLoadingData(false); return;
+    }
     setNextSession(next);
 
     const workingSessionId = targetSessionId || selectedSession?.id || next?.id;
     let workingSession: AppSession | null = next;
 
     if (workingSessionId) {
-      const { data, error } = await supabase.from('sessions').select('*').eq('id', workingSessionId).single();
-      if (!error && data) workingSession = data as AppSession;
+      const { data, error } = await supabase.from('sessions').select('*').eq('id', workingSessionId).in('status', [...ACTIVE_SESSION_STATUSES]).maybeSingle();
+      if (error) { setError('No se pudo verificar la sesión seleccionada: ' + error.message); workingSession = null; }
+      else if (isActiveSession(data)) workingSession = data as AppSession;
     }
 
     setSelectedSession(workingSession || null);
@@ -166,11 +174,19 @@ if (playerIds.length > 0) {
   }
 
   async function moveToNextOpenSession() {
-    const next = await getNextAvailableSession();
-    setNextSession(next);
-    setSelectedSession(next);
-    await load(next?.id);
+    try {
+      const next = await getNextAvailableSession();
+      setNextSession(next); setSelectedSession(next); await load(next?.id);
+    } catch (failure) { setError('No se pudo cargar la próxima sesión: ' + String(failure)); }
   }
+
+  async function onArchiveChange(session: AppSession) {
+    if (session.status === 'archived' && selectedSession?.id === session.id) {
+      setSelectedSession(null); setPlayers([]); setAttendance([]); setEvaluations([]);
+    }
+    setNextSession(await getNextAvailableSession());
+  }
+  useEffect(() => { if (tab !== 'summary') setSummarySessionId(''); }, [tab]);
 
   useEffect(() => {
     load();
@@ -216,12 +232,12 @@ if (playerIds.length > 0) {
         <main>
           {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
           {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
-          {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} />}
+          {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage role={role} reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} onArchiveChange={onArchiveChange} onViewHistory={id => { setSummarySessionId(id); setTab('summary'); }} />}
           {tab === 'callup' && selectedSession && (isAdmin || isCoach) && <CallupPage role={role} session={selectedSession} reload={load} setError={setError} />}
           {tab === 'attendance' && selectedSession && <AttendancePage role={role} session={selectedSession} players={players} attendance={attendance} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'evaluation' && selectedSession && <EvaluationPage role={role} session={selectedSession} players={players} evaluations={evaluations} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'injuries' && selectedSession && <InjuriesPage session={selectedSession} players={players} reload={load} setError={setError} role={role} />}
-          {tab === 'summary' && <SummaryPage />}
+          {tab === 'summary' && <SummaryPage initialSessionId={summarySessionId} />}
           {tab === 'standouts' && <StandoutsPage role={role} />}
           {tab === 'intelligence' && isAdmin && <IntelligencePage />}
           {tab === 'reports' && (isAdmin || isCoach) && <ReportsPage />}

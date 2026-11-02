@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
 import { formatDate, translateAttendance } from '../utils/formatters';
+import { loadAllSessions } from '../lib/data';
 
 export function HistoryPage() {
   const [attendanceError,setAttendanceError]=useState('');
@@ -20,13 +21,9 @@ export function HistoryPage() {
   const [view, setView] = useState<'players' | 'cards' | 'summary'>('players');
 
   async function loadSessions() {
-    const { data } = await supabase
-      .from('sessions')
-      .select('*')
-      .order('session_date', { ascending: false });
-
-    setSessions(data || []);
-    setSelectedSessionId((data || [])[0]?.id || '');
+    try {
+      const data = await loadAllSessions(); setSessions(data); setSelectedSessionId(data[0]?.id || '');
+    } catch (error) { setSessions([]); setAttendanceError('No se pudo leer el catálogo histórico: ' + String(error)); }
   }
 
   async function loadHistory(sessionId: string) {
@@ -92,7 +89,7 @@ export function HistoryPage() {
 
       <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
         {sessions.map(s => (
-          <option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)}</option>
+          <option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)} · {s.status === 'archived' ? 'Archivada' : s.status}</option>
         ))}
       </select>
 

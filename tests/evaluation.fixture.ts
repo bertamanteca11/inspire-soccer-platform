@@ -1,0 +1,8 @@
+// Entirely synthetic sporting data, independent of the verified Marcos fixture.
+const uuid = (n: number) => '10000000-0000-4000-8000-' + String(n).padStart(12,'0');
+export const sportPlayers = ['Alex eligible','Bruno no convocado','Carla ausente','Diego invitado','Eli sin asistencia'].map((name,i)=>({id:uuid(i+1),name,display_name:name,status:'active',shirt_number:i+1}));
+export const sportSessions = ['2026-10-23','2026-10-25','2026-10-26'].map((date,i)=>({id:uuid(100+i),name:['Entreno viernes','Entreno domingo','Entreno lunes'][i],session_date:date,type:'training',status:'completed',high_rating_limit:6,low_rating_limit:3,callup_confirmed:true,attendance_confirmed:true,evaluation_confirmed:false}));
+export const sportCallups = sportSessions.flatMap(s=>sportPlayers.map((p,i)=>({id:uuid(200+Number(s.id.slice(-3))*10+i),session_id:s.id,player_id:p.id,status:i===1?'not_called':i===3?'guest_not_evaluable':'called_up',evaluable:![1,3].includes(i)})));
+export const sportAttendance = sportSessions.flatMap(s=>sportPlayers.filter((_,i)=>i!==4).map((p,i)=>({id:uuid(400+Number(s.id.slice(-3))*10+i),session_id:s.id,player_id:p.id,status:i===2?'unjustified_absence':'present'})));
+export const sportEvaluations = sportSessions.flatMap((s,si)=>sportPlayers.map((p,i)=>({id:uuid(600+si*10+i),session_id:s.id,player_id:p.id,evaluated:true,tactical_discipline:si===1?3:5,effort_commitment:si===1?3:5,decision_making:si===1?3:5,mentality_attitude:si===1?3:5,coachability:si===1?3:i===0&&si===0?3:5,na_fields:{},players:{display_name:p.display_name}})));
+export const sportStandouts = [{id:uuid(900),session_id:sportSessions[1].id,player_id:sportPlayers[0].id,category:'top',rank:1}];
