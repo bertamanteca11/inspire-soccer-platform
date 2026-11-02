@@ -1,3 +1,7 @@
+import { callupDraft, defaultCallup as defaultChoice, type CallupChoice } from '../utils/workflowDrafts';
+import { workflowAction } from '../lib/workflows';
+import { workflowRows } from '../lib/workflowReads';
+import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, RotateCcw, Save, AlertTriangle } from 'lucide-react';
@@ -18,15 +22,6 @@ type CallupRow = {
   notes?: string | null;
 };
 
-type CallupChoice = { status: string; evaluable: boolean };
-
-function defaultChoice(player: Player): CallupChoice {
-  return {
-    status: player.status === 'trial' ? 'trial' : player.status === 'guest' ? 'guest_not_evaluable' : 'called_up',
-    evaluable: player.status !== 'guest',
-  };
-}
-
 export function CallupPage({ role, session, reload, setError }: {
   role: Role;
   session: AppSession;
@@ -43,7 +38,8 @@ export function CallupPage({ role, session, reload, setError }: {
   const playerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const requestId = useRef(0);
 
-  const locked = localLocked;
+  const access = useWorkflowAccess(session.id, 'callup', localLocked);
+  const locked = localLocked || role !== 'admin' || !access.canEdit;
   const isAdmin = role === 'admin';
 
   useEffect(() => {
@@ -55,24 +51,20 @@ export function CallupPage({ role, session, reload, setError }: {
     async function load() {
       setLoading(true);
       const [playersRes, callupsRes, suspensionsRes] = await Promise.all([
-        supabase.from('players').select('*').in('status', ['active', 'injured', 'trial', 'guest']).order('shirt_number', { ascending: true, nullsFirst: false }),
-        supabase.from('callups').select('*').eq('session_id', session.id),
+        workflowRows<Player>((a,b) => supabase.from('players').select('*').order('id').range(a,b)),
+        workflowRows<CallupRow>((a,b) => supabase.from('callups').select('*').eq('session_id', session.id).order('player_id').range(a,b)),
         supabase.from('active_suspensions').select('*'),
       ]);
       if (request !== requestId.current) return;
       const error = playersRes.error || callupsRes.error || suspensionsRes.error;
-      if (error) setError(error.message);
-      const allPlayers = sortPlayersByJersey((playersRes.data || []) as Player[]);
+      if (error) { setError(error.message); setPlayers([]); setDrafts({}); setLoading(false); return; }
       const existing = (callupsRes.data || []) as CallupRow[];
-      const byPlayer = new Map(existing.map(row => [row.player_id, row]));
-      const hasExisting = existing.length > 0;
+      const savedIds = new Set(existing.map(row => row.player_id));
+      const allPlayers = sortPlayersByJersey(((playersRes.data || []) as Player[]).filter(p => savedIds.has(p.id) || ['active','injured','trial','guest'].includes(p.status)));
+      if (existing.some(row => !allPlayers.some(p => p.id === row.player_id))) { setError('Plantilla incompleta. Recarga antes de guardar.'); setPlayers([]); setLoading(false); return; }
+      if (new Set(existing.map(row => row.player_id)).size !== existing.length) { setError('Convocatoria duplicada. Revisión necesaria.'); setPlayers([]); setLoading(false); return; }
       const initial: Record<string, CallupChoice | null> = {};
-      for (const p of allPlayers) {
-        const row = byPlayer.get(p.id);
-        if (row) initial[p.id] = { status: row.status, evaluable: row.evaluable };
-        else if (!session.callup_confirmed && !hasExisting) initial[p.id] = defaultChoice(p);
-        else initial[p.id] = null; // Historical missing row: unknown, not automatically uncalled
-      }
+      for (const p of allPlayers) initial[p.id] = callupDraft(session, p, existing);
       setPlayers(allPlayers);
       setCallups(existing);
       setDrafts(initial);
@@ -83,36 +75,13 @@ export function CallupPage({ role, session, reload, setError }: {
     return () => { requestId.current += 1; };
   }, [session.id, session.callup_confirmed]);
 
-  async function persistChoice(player: Player, choice: CallupChoice): Promise<boolean> {
-    const { data, error } = await supabase.from('callups').upsert({
-      session_id: session.id,
-      player_id: player.id,
-      status: choice.status,
-      evaluable: choice.evaluable,
-    }, { onConflict: 'session_id,player_id' }).select('*').single();
-    if (error) { setError(error.message); return false; }
-    if (data) setCallups(prev => [...prev.filter(c => c.player_id !== player.id), data as CallupRow]);
-    return true;
-  }
-
-  async function togglePlayer(player: Player) {
+  function togglePlayer(player: Player) {
     if (locked || saving) return;
-    setSaving(true);
-    setError('');
     const current = drafts[player.id];
-    const next: CallupChoice = current === null || current?.status === 'not_called' ? defaultChoice(player) : { status: 'not_called', evaluable: false };
-    const ok = await persistChoice(player, next);
-    if (ok) {
-      setDrafts(prev => ({ ...prev, [player.id]: next }));
-      const currentIndex = players.findIndex(p => p.id === player.id);
-      const nextPlayer = players[(currentIndex + 1) % players.length];
-      requestAnimationFrame(() => {
-        if (nextPlayer && nextPlayer.id !== player.id) {
-          playerRefs.current[nextPlayer.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      });
-    }
-    setSaving(false);
+    const next = !current || current.status === 'not_called' ? defaultChoice(player) : { status: 'not_called', evaluable: false };
+    setDrafts(prev => ({ ...prev, [player.id]: next }));
+    const nextPlayer = players[(players.findIndex(p => p.id === player.id) + 1) % players.length];
+    if (nextPlayer?.id !== player.id) playerRefs.current[nextPlayer.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   async function confirmConvocatoria() {
@@ -133,32 +102,24 @@ export function CallupPage({ role, session, reload, setError }: {
       status: drafts[p.id]!.status,
       evaluable: drafts[p.id]!.evaluable,
     }));
-    if (rows.length) {
-      const { error } = await supabase.from('callups').upsert(rows, { onConflict: 'session_id,player_id' });
-      if (error) { setError(error.message); setSaving(false); return; }
-    }
-    const { error } = await supabase.from('sessions').update({
-      callup_confirmed: true,
-      callup_confirmed_at: new Date().toISOString(),
-    }).eq('id', session.id);
-    if (error) { setError(error.message); setSaving(false); return; }
-    setLocalLocked(true);
-    await reload(session.id);
-    setSaving(false);
+    try {
+      await workflowAction(session.id, 'callup', 'confirm', rows);
+      setLocalLocked(true);
+      await reload(session.id);
+    } catch (error) { setError(String(error)); }
+    finally { setSaving(false); }
   }
 
   async function reopenConvocatoria() {
     if (!isAdmin || saving) return;
     if (!window.confirm('¿Reabrir convocatoria? Esto permitirá hacer cambios otra vez.')) return;
     setSaving(true);
-    const { error } = await supabase.from('sessions').update({
-      callup_confirmed: false,
-      callup_confirmed_at: null,
-    }).eq('id', session.id);
-    if (error) { setError(error.message); setSaving(false); return; }
-    setLocalLocked(false);
-    await reload(session.id);
-    setSaving(false);
+    try {
+      await workflowAction(session.id, 'callup', 'reopen');
+      setLocalLocked(false);
+      await reload(session.id);
+    } catch (error) { setError(String(error)); }
+    finally { setSaving(false); }
   }
 
   if (loading) return <div className="stack"><SessionHeading session={session}/><Card><p>Cargando convocatoria...</p></Card></div>;
@@ -168,6 +129,7 @@ export function CallupPage({ role, session, reload, setError }: {
   const missingCount = players.filter(p => !savedIds.has(p.id)).length;
 
   return <div className="stack">
+    {access.error && <p role="alert">No se pueden verificar los permisos: {access.error}</p>}
     <SessionHeading session={session}/>
     {suspensions.length > 0 && <Card className="warning">
       <AlertTriangle size={18} />
@@ -175,22 +137,21 @@ export function CallupPage({ role, session, reload, setError }: {
         <ProgressiveAlerts items={suspensions.map((s: any) => ({key:s.id,content:<p>{s.display_name}: {s.matches_remaining} partido(s)</p>}))}/>
       </div>
     </Card>}
-    {missingCount > 0 && callups.length > 0 && <Card className="warning">
+    {missingCount > 0 && players.some(p => drafts[p.id] === null) && <Card className="warning">
       <AlertTriangle size={18} />
       <p>Hay {missingCount} jugadores sin registro explícito de convocatoria. «Sin registro» no significa «No convocado». Revisa cada uno con el entrenador antes de confirmar; pulsa «Sin registro» para marcarlo convocado y vuelve a pulsar para marcarlo no convocado.</p>
     </Card>}
     <Card className={locked ? 'locked-card confirmed-card' : ''}>
       <p className="kicker">Estado</p>
       <h2>{locked ? 'Convocatoria confirmada' : `${calledCount} convocados`}</h2>
-      {locked ? <div className="stack">
+      {localLocked ? <div className="stack">
         <button className="primary confirmed" disabled><CheckCircle2 size={18} /> Convocatoria confirmada</button>
         {isAdmin && <button className="secondary danger" disabled={saving} onClick={reopenConvocatoria}><RotateCcw size={16} /> Reabrir convocatoria</button>}
-      </div> : <button className="primary" disabled={saving || players.length === 0} onClick={confirmConvocatoria}><Save size={18} /> {saving ? 'Guardando...' : 'Confirmar convocatoria'}</button>}
+      </div> : <button className="primary" disabled={locked || saving || players.length === 0} onClick={confirmConvocatoria}><Save size={18} /> {saving ? 'Guardando...' : 'Confirmar convocatoria'}</button>}
     </Card>
     {players.map(player => {
       const choice = drafts[player.id];
       const selected = choice !== null && choice !== undefined && choice.status !== 'not_called';
-      const hasSaved = savedIds.has(player.id);
       const label = choice === null || choice === undefined ? 'Sin registro' : selected ? 'Convocado' : 'No convocado';
       return <div key={player.id} ref={node => { playerRefs.current[player.id] = node; }}>
         <Card><div className="row">

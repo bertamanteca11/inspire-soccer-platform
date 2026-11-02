@@ -14,6 +14,7 @@ async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok'}=
       return route.continue();
     }
     const table=url.pathname.split('/').pop();
+    if(table==='batch4_workflow_access')return route.fulfill({json:true});
     if(!url.pathname.includes('/rest/v1/')){unexpected.push(request.method()+' '+url.pathname);return route.abort();}
     if(request.method()!=='GET'){
       writes.push({table,body:request.postDataJSON()});
@@ -84,9 +85,8 @@ test('missing attendance cannot save or confirm as presence without an explicit 
   await expect(page.getByRole('button',{name:'Guardar asistencia',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Selecciona la situación');expect(state.writes).toEqual([]);
-  page.once('dialog',dialog=>dialog.accept());
   await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Selecciona la situación');expect(state.writes).toEqual([]);
+  await expect(page.getByRole('alert')).toContainText('Guarda y verifica');expect(state.writes).toEqual([]);
   await page.getByRole('button',{name:'Presente',exact:true}).click();
   await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('guardada correctamente');
@@ -117,8 +117,7 @@ test('a failed verification read never confirms attendance after saving',async({
   const state=await setup(page,{failRefresh:true});await page.goto('/phase4-test?mode=editor');
   await expect(page.getByRole('button',{name:'Presente',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Presente',exact:true}).click();
-  page.once('dialog',dialog=>dialog.accept());
-  await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
+  await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('no se pudo verificar la lectura');
   expect(state.writes).toHaveLength(1);expect(state.writes[0].table).toBe('attendance');
   await expect(page.getByText('Asistencia cerrada',{exact:true})).toHaveCount(0);

@@ -11,6 +11,11 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
       return route.continue();
     }
     const table=url.pathname.split('/').pop();
+    if(table==='batch4_workflow_access')return route.fulfill({json:true});
+    if(table==='batch4_workflow_action'){
+      const body=req.postDataJSON();writes.push({table,body});
+      return route.fulfill({json:{id:body.p_session,[body.p_workflow+'_confirmed']:body.p_action==='confirm'}});
+    }
     if(table==='create_yellow_accumulation_suspensions')return route.fulfill({json:null}); // Existing Home read-screen side effect is simulated only.
     if(!url.pathname.includes('/rest/v1/')){unexpected.push(url.pathname);return route.abort();}
     if(denied&&table==='callups')return route.fulfill({status:403,json:{code:'42501',message:'Eligibility read denied'}});
@@ -123,8 +128,8 @@ test('confirmation never fills or overwrites explicit historical ratings',async(
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
   await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toBeVisible();
   expect(state.evaluations).toEqual(fixture.sportEvaluations);
-  expect(state.writes).toHaveLength(1);expect(state.writes[0].table).toBe('sessions');
-  expect(state.writes[0].body).toMatchObject({evaluation_confirmed:true});
+  expect(state.writes).toHaveLength(1);expect(state.writes[0].table).toBe('batch4_workflow_action');
+  expect(state.writes[0].body).toMatchObject({p_workflow:'evaluation',p_action:'confirm'});
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
@@ -135,7 +140,7 @@ test('confirmation disables edits while validating and submits the session only 
   await expect(page.getByRole('button',{name:'Verificando evaluación…',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'4',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toBeVisible();
-  expect(state.writes.filter(w=>w.table==='sessions')).toHaveLength(1);
+  expect(state.writes.filter(w=>w.table==='batch4_workflow_action')).toHaveLength(1);
   expect(state.evaluations).toEqual(fixture.sportEvaluations);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
@@ -192,9 +197,9 @@ test('callup missing-row semantics remain unchanged while suspensions expand pro
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
-test('fresh empty unconfirmed callup still shows draft defaults without persisting them',async({page})=>{
+test('empty unmarked callup retains unknown historical records without persisting them',async({page})=>{
   const state=await setup(page,{emptyCallups:true}); await page.goto('/phase4-test?mode=callup&draft-callup=1');
-  await expect(page.getByRole('button',{name:'Convocado',exact:true})).toHaveCount(5);
+  await expect(page.getByRole('button',{name:'Sin registro',exact:true})).toHaveCount(5);
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 

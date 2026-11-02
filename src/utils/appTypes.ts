@@ -3,6 +3,7 @@ import type { Session } from '../types';
 export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'standouts'|'history'|'intelligence'|'reports'|'veo';
 
 export type AppSession = Session & {
+  draft_defaults_version?: number | null;
   start_time?: string | null;
   callup_confirmed?: boolean;
   callup_confirmed_at?: string | null;

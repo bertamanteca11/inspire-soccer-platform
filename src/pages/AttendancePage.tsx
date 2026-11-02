@@ -1,3 +1,7 @@
+import { operationalAttendanceDraft, attendanceSnapshot, usesDraftDefaults } from '../utils/workflowDrafts';
+import { workflowAction } from '../lib/workflows';
+import { workflowRows } from '../lib/workflowReads';
+import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
 import { attendanceDraft } from '../utils/attendanceDrafts';
 import { useEffect, useState } from 'react';
@@ -51,6 +55,8 @@ export function AttendancePage({
   setError: any;
   moveToNextOpenSession?: any;
 }) {
+  const [stored, setStored] = useState<Attendance[]>([]);
+  const [draftSession, setDraftSession] = useState('');
   const [drafts, setDrafts] = useState<Record<string, { status: string; notes: string }>>({});
   const [localLocked, setLocalLocked] = useState(!!session.attendance_confirmed);
   const [saving, setSaving] = useState(false);
@@ -61,124 +67,84 @@ export function AttendancePage({
   const [rosterError, setRosterError] = useState('');
   useEffect(() => {
     let cancelled = false;
-    setRosterLoading(true); setRosterError(''); setRoster([]); setCalledIds(new Set()); setSavedNotice('');
+    setRosterLoading(true); setRosterError(''); setRoster([]); setCalledIds(new Set()); setSavedNotice(''); setDraftSession('');
     Promise.all([
-      supabase.from('callups').select('player_id,status').eq('session_id', session.id),
-      supabase.from('players').select('*').in('status', ['active', 'injured', 'trial', 'guest']).order('display_name'),
-    ]).then(([callups, playerRows]) => {
+      workflowRows<{ player_id: string; status: string }>((a,b) => supabase.from('callups').select('player_id,status').eq('session_id', session.id).order('player_id').range(a,b)),
+      workflowRows<Player>((a,b) => supabase.from('players').select('*').order('id').range(a,b)),
+      workflowRows<Attendance>((a,b) => supabase.from('attendance').select('*').eq('session_id', session.id).order('player_id').range(a,b)),
+    ]).then(([calls, playerRows, visits]) => {
       if (cancelled) return;
-      const error = callups.error || playerRows.error;
-      if (error) { setRosterError(error.message); setError(error.message); }
-      else { setCalledIds(new Set((callups.data || []).filter(c => c.status !== 'not_called').map(c => c.player_id))); setRoster((playerRows.data || []) as Player[]); }
-      setRosterLoading(false);
-    }).catch(error => { if (!cancelled) { setRosterError(String(error)); setRosterLoading(false); } });
+      const error = calls.error || playerRows.error || visits.error;
+      if (error) throw new Error(error.message);
+      const callRows = calls.data || [];
+      const saved = (visits.data || []) as Attendance[];
+      if (new Set(callRows.map(c => c.player_id)).size !== callRows.length || new Set(saved.map(c => c.player_id)).size !== saved.length) throw new Error('Registros duplicados. Revisión necesaria.');
+      const called = new Set<string>(callRows.filter(c => ['called_up','trial','guest_not_evaluable'].includes(c.status)).map(c => c.player_id));
+      const savedIds = new Set(saved.map(row => row.player_id));
+      const all = (playerRows.data || []) as Player[];
+      const list = all.filter(p => called.has(p.id) || savedIds.has(p.id) || ['active','injured','trial','guest'].includes(p.status));
+      if ([...called, ...savedIds].some(id => !all.some(p => p.id === id))) throw new Error('Plantilla incompleta. Recarga antes de guardar.');
+      const initial: Record<string, { status: string; notes: string }> = {};
+      for (const p of list) initial[p.id] = operationalAttendanceDraft(session, p.id, saved, called.has(p.id));
+      setStored(saved); setRoster(list); setCalledIds(called); setDrafts(initial); setDraftSession(session.id); setRosterLoading(false);
+    }).catch(error => { if (!cancelled) { setRosterError(String(error)); setError(String(error)); setRosterLoading(false); } });
     return () => { cancelled = true; };
-  }, [session.id]);
-  const attendancePlayers = sortPlayersByJersey(roster.length ? roster : players);
-
-  const locked = localLocked;
+  }, [session.id, session.callup_confirmed, session.attendance_confirmed]);
+  const attendancePlayers = sortPlayersByJersey(roster);
+  const access = useWorkflowAccess(session.id, 'attendance', localLocked);
+  const locked = localLocked || !['admin','coach'].includes(role) || !access.canEdit || draftSession !== session.id;
   const isAdmin = role === 'admin';
-
-  useEffect(() => {
-    const initial: Record<string, { status: string; notes: string }> = {};
-    attendancePlayers.forEach((p: Player) => {
-      initial[p.id] = attendanceDraft(attendance || [], session.id, p.id);
-    });
-    setDrafts(initial);
-  }, [session.id, attendance, players, roster]);
-
-  useEffect(() => {
-    setLocalLocked(!!session.attendance_confirmed);
-  }, [session.id, session.attendance_confirmed]);
-
-  async function saveAttendance(showAlert = true): Promise<boolean> {
-    if (locked || saving || rosterLoading || rosterError || !attendancePlayers.length) return false;
-    setSaving(true);
-    setError('');
-    setSavedNotice('');
-
-    try {
-    const pending = attendancePlayers.filter(p=>!drafts[p.id]?.status);
-    if(pending.length){setError('Selecciona la situación de todos los jugadores antes de guardar: '+pending.map(p=>p.display_name).join(', '));setSaving(false);return false;}
-    const rows = attendancePlayers.map((p: Player) => {
-      const draft = drafts[p.id];
-      return {
-        session_id: session.id,
-        player_id: p.id,
-        status: draft.status,
-        notes: draft.notes || null,
-      };
-    });
-
-    const { error } = await supabase
-      .from('attendance')
-      .upsert(rows, { onConflict: 'session_id,player_id' });
-
-    if (error) {
-      setError(error.message);
-      return false;
-    }
-
-    const refreshed = await supabase.from('attendance').select('*').eq('session_id', session.id);
-    if (refreshed.error) {
-      setError('Se guardó la asistencia, pero no se pudo verificar la lectura. Recarga antes de confirmar: ' + refreshed.error.message);
-      return false;
-    }
-
-    await reload(session.id);
-
-    if (showAlert) setSavedNotice('Asistencia guardada correctamente.');
-    return true;
-    } catch (error) {
-      setError('No se pudo completar la operación de asistencia. Recarga para verificar los registros antes de confirmar: ' + (error instanceof Error ? error.message : String(error)));
-      return false;
-    } finally { setSaving(false); }
+  const savePlayers = attendancePlayers.filter(p => !usesDraftDefaults(session) || calledIds.has(p.id) || stored.some(row => row.player_id === p.id) || !!drafts[p.id]?.status);
+  function selectedRows() {
+    return savePlayers.map(p => ({ session_id: session.id, player_id: p.id, status: drafts[p.id]?.status || '', notes: drafts[p.id]?.notes || null }));
   }
 
+  useEffect(() => { setLocalLocked(!!session.attendance_confirmed); }, [session.id, session.attendance_confirmed]);
+  async function saveAttendance(): Promise<boolean> {
+    if (locked || saving || rosterLoading || rosterError || !savePlayers.length) return false;
+    const rows = selectedRows();
+    if (rows.some(row => !row.status)) { setError('Selecciona la situación de los jugadores pendientes antes de guardar.'); return false; }
+    setSaving(true); setError(''); setSavedNotice('');
+    try {
+      const result = await supabase.from('attendance').upsert(rows, { onConflict: 'session_id,player_id' });
+      if (result.error) throw new Error(result.error.message);
+      const refreshed = await workflowRows<Attendance>((a,b) => supabase.from('attendance').select('*').eq('session_id', session.id).order('player_id').range(a,b));
+      if (refreshed.error) throw new Error('Se guardó la asistencia, pero no se pudo verificar la lectura: ' + refreshed.error.message);
+      if (attendanceSnapshot(refreshed.data || []) !== attendanceSnapshot(rows)) throw new Error('No se verificaron todos los estados guardados. Recarga antes de confirmar.');
+      setStored((refreshed.data || []) as Attendance[]);
+      await reload(session.id);
+      setSavedNotice('Asistencia guardada correctamente.'); return true;
+    } catch (error) { setError(String(error)); return false; }
+    finally { setSaving(false); }
+  }
   async function confirmAttendance() {
     if (locked || saving || rosterLoading || rosterError) return;
-    const confirmed = window.confirm('¿Confirmar asistencia? Se guardará y el coach no podrá modificarla después.');
-    if (!confirmed) return;
-
-    const saved = await saveAttendance(false);
-    if (!saved) return;
-
-    const { error } = await supabase
-      .from('sessions')
-      .update({ attendance_confirmed: true, attendance_confirmed_at: new Date().toISOString() })
-      .eq('id', session.id);
-
-    if (error) {
-      setError(error.message);
-      return;
+    const rows = selectedRows();
+    if (!rows.length || rows.some(row => !row.status) || attendanceSnapshot(rows) !== attendanceSnapshot(stored)) {
+      setError('Guarda y verifica la asistencia antes de confirmar.'); return;
     }
-
-    setLocalLocked(true);
-    if (moveToNextOpenSession) await moveToNextOpenSession();
-    else await reload(session.id);
+    if (!window.confirm('Confirmar la asistencia guardada?')) return;
+    setSaving(true);
+    try {
+      await workflowAction(session.id, 'attendance', 'confirm', rows);
+      setLocalLocked(true);
+      if (moveToNextOpenSession) await moveToNextOpenSession(); else await reload(session.id);
+    } catch (error) { setError(String(error)); }
+    finally { setSaving(false); }
   }
-
   async function reopenAttendance() {
-    if (!isAdmin) return;
-
-    const confirmed = window.confirm('¿Reabrir asistencia? Esto permitirá hacer cambios otra vez.');
-    if (!confirmed) return;
-
-    const { error } = await supabase
-      .from('sessions')
-      .update({ attendance_confirmed: false, attendance_confirmed_at: null })
-      .eq('id', session.id);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    setLocalLocked(false);
-    await reload(session.id);
+    if (!isAdmin || saving || !window.confirm('Reabrir asistencia?')) return;
+    setSaving(true);
+    try {
+      await workflowAction(session.id, 'attendance', 'reopen');
+      setLocalLocked(false);
+      await reload(session.id);
+    } catch (error) { setError(String(error)); }
+    finally { setSaving(false); }
   }
-
   function setDraft(playerId: string, update: Partial<{ status: string; notes: string }>) {
+    if (locked || saving || rosterLoading || rosterError) return;
+    setSavedNotice('');
     setDrafts(prev => ({
       ...prev,
       [playerId]: {
@@ -204,23 +170,24 @@ export function AttendancePage({
 
   return (
     <div className="stack">
-      <SessionHeading session={session} subtitle="Guardar conserva cambios. Confirmar bloquea la edición del entrenador."/>
+      {access.error && <p role="alert">No se pueden verificar los permisos: {access.error}</p>}
+      <SessionHeading session={session} subtitle="Guardar conserva cambios. Confirmar cierra los registros guardados."/>
 
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
         <p className="kicker">Estado</p>
-        <h2>{locked ? 'Asistencia cerrada' : 'Asistencia abierta'}</h2>
+        <h2>{localLocked ? 'Asistencia cerrada' : 'Asistencia abierta'}</h2>
 
-        {locked ? (
+        {localLocked ? (
           <div className="stack">
             <button className="primary confirmed" disabled><CheckCircle2 size={18} /> Asistencia cerrada</button>
             {isAdmin && <button className="secondary danger" onClick={reopenAttendance}><RotateCcw size={16} /> Reabrir asistencia</button>}
           </div>
         ) : (
           <div className="stack">
-            <button className="secondary" onClick={() => saveAttendance(true)} disabled={saving || rosterLoading || !!rosterError}>
+            <button className="secondary" onClick={() => saveAttendance()} disabled={locked || saving || rosterLoading || !!rosterError}>
               <Save size={16} /> {saving ? 'Guardando...' : 'Guardar asistencia'}
             </button>
-            <button className="primary" disabled={saving || rosterLoading || !!rosterError} onClick={confirmAttendance}>
+            <button className="primary" disabled={locked || saving || rosterLoading || !!rosterError} onClick={confirmAttendance}>
               Confirmar asistencia
             </button>
           </div>
@@ -232,7 +199,7 @@ export function AttendancePage({
       {rosterError && <p role="alert">No se puede guardar sin verificar la plantilla: {rosterError}</p>}
       <Card><p className="muted">«Sin registrar» no suma presencia ni ausencia. Revisa el estado de cada jugador, incluidos los no convocados. Las notas existentes se conservan.</p></Card>
       {attendancePlayers.map((p: Player) => {
-        const draft = drafts[p.id] || attendanceDraft(attendance || [], session.id, p.id);
+        const draft = drafts[p.id] || { status: '', notes: '' };
         const needs = attendanceNeedsExplanation.includes(draft.status);
         const missingNote = needs && !draft.notes.trim();
 

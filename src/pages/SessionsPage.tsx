@@ -21,6 +21,7 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [view, setView] = useState<'active' | 'archived'>('active');
+  const [creationKind, setCreationKind] = useState<'' | 'operational' | 'historical'>('');
   const [editing, setEditing] = useState<AppSession | null>(null), [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [archiveDialog, setArchiveDialog] = useState<AppSession | null>(null);
@@ -39,7 +40,7 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
   useEffect(() => { void loadSessions(); return () => { loadId.current++; }; }, []);
   function openEdit(session?: AppSession) {
     if (!canEdit || busy || session && !isActiveSession(session)) return;
-    setMessage(null); setEditing(session || null);
+    setMessage(null); setEditing(session || null); setCreationKind('');
     setForm(session ? { name: session.name || '', session_date: session.session_date, start_time: session.start_time || '', type: session.type, responsible: session.responsible || '', opponent: session.opponent || '', home_away: session.home_away || 'home', status: session.status } : emptyForm());
     setShowModal(true);
   }
@@ -47,13 +48,14 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
   async function saveSession(event: React.FormEvent) {
     event.preventDefault();
     if (!canEdit || mutating.current || !['planned', 'completed'].includes(form.status)) return;
+    if (!editing && (!creationKind || creationKind === 'operational' && form.status !== 'planned')) { setMessage({ text: 'Selecciona el origen. Las sesiones operativas nuevas deben estar planificadas.', error: true }); return; }
     mutating.current = true; setBusy(true); setMessage(null);
     const payload = { ...form, start_time: form.start_time || null, responsible: form.responsible || null, opponent: form.opponent || null, home_away: form.home_away || null };
     try {
       // Updating metadata never resets rating limits or other unedited fields.
       const result = editing
         ? await supabase.from('sessions').update(payload).eq('id', editing.id).eq('status', editing.status).select('*')
-        : await supabase.from('sessions').insert({ ...payload, high_rating_limit: 6, low_rating_limit: 3 }).select('*');
+        : await supabase.from('sessions').insert({ ...payload, high_rating_limit: 6, low_rating_limit: 3, ...(creationKind === 'operational' ? { draft_defaults_version: 1 } : {}) }).select('*');
       if (result.error) throw new Error(sessionWriteError(result.error));
       const id = editing?.id || result.data?.[0]?.id;
       if (!id) throw new Error('No se pudo verificar la sesión creada. Recarga antes de reintentar.');
@@ -103,6 +105,7 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
       <button className="primary" disabled={busy || archiveDialog.status === 'archived' && !restoreAs} onClick={() => void confirmArchive()}>{busy ? 'Verificando…' : archiveDialog.status === 'archived' ? 'Confirmar restauración' : 'Confirmar archivo'}</button>
     </Modal>}
     {showModal && <Modal title={editing ? 'Editar sesión' : 'Crear sesión'} onClose={() => { if (!busy) setShowModal(false); }}><form className="stack" onSubmit={saveSession}>
+      {!editing && <label>Origen<select aria-label="Origen sesión" value={creationKind} onChange={e => setCreationKind(e.target.value as typeof creationKind)} required disabled={busy}><option value="">Seleccionar origen</option><option value="operational">Nueva sesión operativa</option><option value="historical">Registro histórico / importado</option></select></label>}
       <input aria-label="Nombre sesión" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required disabled={busy}/>
       <input aria-label="Fecha sesión" type="date" value={form.session_date} onChange={e => setForm({ ...form, session_date: e.target.value })} required disabled={busy}/>
       <input aria-label="Hora sesión" type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} disabled={busy}/>

@@ -1,0 +1,36 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const ts=require('typescript');
+require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,f);
+const {callupDraft,operationalAttendanceDraft,attendanceSnapshot}=require('../src/utils/workflowDrafts.ts');
+const {eligibilityReason}=require('../src/utils/evaluationEligibility.ts');
+const {workflowRows}=require('../src/lib/workflowReads.ts');
+const session={id:'s',draft_defaults_version:1,callup_confirmed:false};
+const player={id:'p',status:'active'};
+test('workflow reads use actual page lengths and discard incomplete reads',async()=>{
+  const pages=[[1,2],[3],[]];let index=0;const offsets=[];
+  assert.deepEqual(await workflowRows(async offset=>{offsets.push(offset);return {data:pages[index++],error:null}}),{data:[1,2,3],error:null});
+  assert.deepEqual(offsets,[0,2,3]);index=0;
+  assert.deepEqual(await workflowRows(async()=>++index===1?{data:[1],error:null}:{data:null,error:{message:'denied'}}),{data:[],error:{message:'denied'}});
+});
+test('prospective defaults never reinterpret historical, confirmed, unsupported or conflicting callups',()=>{
+  assert.deepEqual(callupDraft(session,player,[]),{status:'called_up',evaluable:true});
+  for(const patch of [{draft_defaults_version:null},{draft_defaults_version:undefined},{draft_defaults_version:2},{callup_confirmed:true}]) assert.equal(callupDraft({...session,...patch},player,[]),null);
+  const saved={player_id:'p',status:'not_called',evaluable:false};
+  assert.deepEqual(callupDraft(session,player,[saved]),{status:'not_called',evaluable:false});
+  assert.equal(callupDraft(session,player,[saved,saved]),null);
+  assert.deepEqual(callupDraft(session,{...player,status:'guest'},[]),{status:'guest_not_evaluable',evaluable:false});
+  assert.deepEqual(callupDraft(session,{...player,status:'trial'},[]),{status:'trial',evaluable:true});
+});
+test('attendance defaults preserve saved statuses, notes, historical gaps and evaluation requirements',()=>{
+  const s={...session,callup_confirmed:true};
+  assert.equal(operationalAttendanceDraft(s,'p',[],true).status,'present');
+  assert.equal(operationalAttendanceDraft(s,'p',[],false).status,'');
+  for(const patch of [{draft_defaults_version:null},{callup_confirmed:false},{attendance_confirmed:true}]) assert.equal(operationalAttendanceDraft({...s,...patch},'p',[],true).status,'');
+  const row={id:'a',session_id:'s',player_id:'p',status:'injured_present',notes:'Existing note'};
+  assert.deepEqual(operationalAttendanceDraft(s,'p',[row],true),{status:row.status,notes:row.notes});
+  assert.equal(operationalAttendanceDraft(s,'p',[row,{...row,id:'b'}],true).status,'');
+  assert.ok(eligibilityReason('s','p',[{session_id:'s',player_id:'p',status:'called_up',evaluable:true}],[]));
+  assert.equal(attendanceSnapshot([row]),attendanceSnapshot([{...row,notes:row.notes}]));
+});

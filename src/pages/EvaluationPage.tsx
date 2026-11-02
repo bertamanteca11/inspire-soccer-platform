@@ -1,3 +1,5 @@
+import { workflowAction } from '../lib/workflows';
+import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ChevronRight, RotateCcw, Search } from 'lucide-react';
@@ -95,7 +97,8 @@ export function EvaluationPage({
   const [confirming, setConfirming] = useState(false);
   const confirmationPending = useRef(false);
 
-  const locked = localLocked;
+  const access = useWorkflowAccess(session.id, 'evaluation', localLocked);
+  const locked = localLocked || !['admin','coach'].includes(role) || !access.canEdit;
   const recordsOnlyCompleted = Boolean((session as AppSession & { records_only_confirmed?: boolean }).records_only_confirmed);
   const isAdmin = role === 'admin';
 
@@ -195,6 +198,7 @@ export function EvaluationPage({
   if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><SessionHeading session={session}/><Card><h2>No hay jugadores para evaluar</h2><p>No hay participantes con elegibilidad verificable. Revisa convocatoria, asistencia y posibles evaluaciones duplicadas. Los originales se conservan.</p></Card></div>;
 
   async function ensureEval(target: Player = player): Promise<Evaluation | null> {
+    if (locked) return null;
     if (!adminRecordsMode && eligibilityReason(session.id,target.id,callups,attendance)) { setError('No se ha verificado la elegibilidad del jugador.'); return null; }
     if (distinctRows(localEvaluations).filter(e => e.player_id === target.id).length > 1) { setError('Evaluaciones duplicadas: revisar registros originales.'); return null; }
     const existing = localEvaluations.find(e => e.player_id === target.id);
@@ -433,17 +437,12 @@ export function EvaluationPage({
         return;
       }
 
-      const { error } = await supabase.from('sessions').update({
-        records_only_confirmed: true,
-        evaluation_confirmed: true,
-        evaluation_confirmed_at: new Date().toISOString(),
-      }).eq('id', session.id);
-      if (error) { setError('No se pudo finalizar el registro: ' + error.message); return; }
+      await workflowAction(session.id, 'evaluation', 'confirm', existing || [], true);
 
       setLocalLocked(true);
       setSavedNotice('Partido finalizado sin evaluación deportiva.');
       await reload(session.id);
-    } finally {
+    } catch (error) { setError(String(error)); } finally {
       setRecordSaving(false);
     }
   }
@@ -473,13 +472,10 @@ export function EvaluationPage({
       if(ALL_SCORE_FIELDS.some(field=>(counts.high[field]||0)>high||(counts.low[field]||0)>low)) throw new Error('Los limites de puntuacion requieren revision antes de confirmar.');
       for(const target of eligibleNow) if(!await saveCardIfNeeded(target))return;
       if(!await saveComment(player))return;
-      for(const row of reviewed) if(!row.evaluated){
-        const result=await supabase.from('evaluations').update({evaluated:true}).eq('id',row.id).select('*').single();
-        if(result.error || result.data?.id!==row.id) throw new Error(result.error?.message||'No se verifico la evaluacion guardada.');
-      }
-      await supabase.rpc('create_yellow_accumulation_suspensions'); // Preserve the existing disciplinary workflow.
-      const result=await supabase.from('sessions').update({evaluation_confirmed:true,evaluation_confirmed_at:new Date().toISOString()}).eq('id',session.id).eq('status',session.status).select('id').single();
-      if(result.error || result.data?.id!==session.id) throw new Error(result.error?.message||'No se verifico la confirmacion de sesion.');
+      const disciplinary = await supabase.rpc('create_yellow_accumulation_suspensions');
+      if (disciplinary.error) throw new Error(disciplinary.error.message);
+      const finalRows = await readPerformancePages<Evaluation>((a,b)=>supabase.from('evaluations').select('*').eq('session_id',session.id).order('id').range(a,b));
+      await workflowAction(session.id, 'evaluation', 'confirm', finalRows);
       setLocalLocked(true);
       if(moveToNextOpenSession)await moveToNextOpenSession();else await reload(session.id);
     } catch(failure){setError(String(failure));}
@@ -491,15 +487,11 @@ export function EvaluationPage({
     const confirmed = window.confirm('¿Reabrir evaluación? Esto permitirá hacer cambios otra vez.');
     if (!confirmed) return;
 
-    const { error } = await supabase
-      .from('sessions')
-      .update({ evaluation_confirmed: false, evaluation_confirmed_at: null, records_only_confirmed: false })
-      .eq('id', session.id);
-
-    if (error) { setError(error.message); return; }
-
-    setLocalLocked(false);
-    await reload(session.id);
+    try {
+      await workflowAction(session.id, 'evaluation', 'reopen');
+      setLocalLocked(false);
+      await reload(session.id);
+    } catch (error) { setError(String(error)); }
   }
 
   const current: any = ev || {};
@@ -510,12 +502,13 @@ export function EvaluationPage({
 
   return (
     <div className="stack">
+      {access.error && <p role="alert">No se pueden verificar los permisos: {access.error}</p>}
       <SessionHeading session={session}/>
       <Card><details><summary>Criterios de evaluación</summary><p>Solo se evalúa a jugadores convocados y evaluables con asistencia deportiva registrada. Las puntuaciones no seleccionadas no reciben un 3 automático.</p>
         {session.type === 'training' && <p>Se conservan las cinco calidades y las notas históricas.</p>}</details>
         {!!localEvaluations.filter(e => !evaluablePlayers.some(p => p.id === e.player_id)).length && <p role="alert">Hay evaluaciones no elegibles o duplicadas fuera del cómputo. Se conservan para revisión histórica.</p>}
       </Card>
-      {isAdmin && locked && !recordsOnlyCompleted && <Card>
+      {isAdmin && localLocked && !recordsOnlyCompleted && <Card>
         <p className="muted">Si este es un partido histórico sin puntuaciones, pulsa «Reabrir evaluación» para acceder a «Solo registros». Reabrir no borra comentarios, tarjetas, asistencia ni N/A.</p>
       </Card>}
       {isAdmin && !locked && <Card>
@@ -577,13 +570,13 @@ export function EvaluationPage({
       </> : <>
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
 
-        {locked ? (
+        {localLocked ? (
           <div className="stack">
             <button className="primary confirmed" disabled><CheckCircle2 size={18} /> {recordsOnlyCompleted ? "Registros confirmados · sin notas" : "Evaluación confirmada"}</button>
             {isAdmin && <button className="secondary danger" onClick={reopenEvaluation}><RotateCcw size={16} /> Reabrir evaluación</button>}
           </div>
         ) : (
-          <button className="primary" disabled={confirming} onClick={confirmEvaluation}>{confirming ? 'Verificando evaluación…' : 'Confirmar evaluación'}</button>
+          <button className="primary" disabled={locked || confirming} onClick={confirmEvaluation}>{confirming ? 'Verificando evaluación…' : 'Confirmar evaluación'}</button>
         )}
       </Card>
 
