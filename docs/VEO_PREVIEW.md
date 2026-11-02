@@ -1,29 +1,23 @@
 # Fase 2: previsualización local de Excel VEO
 
-La previsualización se ha integrado en el módulo completo. La guía vigente de uso,
-permisos, publicación y **único procedimiento de activación de Supabase** está en
-[VEO_ANALYTICS.md](./VEO_ANALYTICS.md). Esta página detalla el parser local reutilizado.
-
 ## Abrir el visor
 
 1. Instalar las dependencias con `npm install` si aún no están disponibles.
 2. Ejecutar `npm run dev -- --host 127.0.0.1`.
 3. Acceder con una cuenta existente de administrador.
-4. Abrir **Más → VEO Analytics → Importación** y seleccionar `data/BIG DATA EQUIPO.xlsx`.
+4. Abrir **Más → VEO Excel (local)** y seleccionar `data/BIG DATA EQUIPO.xlsx`.
 
 También se puede entrar directamente en
 `http://127.0.0.1:5173/?veo-preview=1`. Esta entrada exige autenticación y consulta
 el rol existente, pero evita montar las páginas operativas y sus RPC de inicio.
-No es un bypass de autenticación. La importación exige administrador; los entrenadores
-pueden consultar la analítica publicada. No se cambian permisos de otras páginas.
+No es un bypass de autenticación. Para este módulo nuevo se ha elegido el acceso
+conservador de administrador; no se cambian los permisos existentes de otras páginas.
 
 El archivo se selecciona desde el dispositivo, nunca se carga automáticamente
 desde `data/`. No se copia a `public/`, no se empaqueta en la aplicación, no se
-envía al seleccionarlo y no se conserva en almacenamiento del navegador. Recargar,
-cerrar la aplicación o pulsar Limpiar descarta la previsualización; cambiar de sección
-VEO la conserva en memoria. Las incidencias y valores originales se inspeccionan en
-pantalla. La publicación es una acción independiente, explícita, de administrador,
-solo disponible después de activar Supabase y revisar identidades y sesiones.
+envía a Supabase y no se conserva en almacenamiento del navegador. Salir de la
+página o pulsar Limpiar descarta la previsualización. Las incidencias y valores
+originales se inspeccionan en la propia pantalla. No existe acción de publicación.
 
 ## Funcionalidad
 
@@ -38,8 +32,6 @@ solo disponible después de activar Supabase y revisar identidades y sesiones.
 - Cálculo de primas en céntimos, octava ocurrencia incluida, categorías independientes,
   derrotas que acumulan pero no pagan y umbral de P0 estrictamente superior a 65.
 - Acumulación por jornada, como el SUMIFS del libro, no por fecha ni orden de filas.
-- Regla confirmada 2026–2027: únicamente J5 en adelante acumula primas. J1–J4
-  nunca afecta esos contadores, aunque se importe después; sus estadísticas se conservan.
 - Estadísticas manuales de equipo/rival separadas de las sumas de jugadores.
 - Cobertura de datos, originales por fila e inspector paginado de celdas/fórmulas.
 - Filtros de incidencias por gravedad y texto, referencias exactas a celdas,
@@ -101,14 +93,14 @@ genéricos/reutilizados se señalan para confirmación.
 
 ## Validación
 
-- `npm test`: 58 pruebas correctas, incluidas las 17 de Fase 1 sin modificaciones.
-- `npm run test:veo-ui`: 7 pruebas correctas con Edge headless en Windows.
+- `npm test`: 38 pruebas correctas, incluidas las 17 de Fase 1 sin modificaciones.
+- `npm run test:veo-ui`: 4 pruebas correctas con Edge headless en Windows.
 - `npm run build:check`: TypeScript y build de producción Vite correctos. La salida
   se escribe en `.veo-build-check/`, ignorada, con `emptyOutDir=false`; no toca dist.
 - `git diff --check`: sin errores de whitespace.
 
-Las pruebas de navegador interceptan autenticación, rol y transporte VEO con respuestas
-simuladas y bloquean cualquier otro acceso externo. Ninguna petición llega a producción.
+Las pruebas de navegador interceptan autenticación y rol con respuestas ficticias
+y bloquean cualquier otro acceso externo. Ninguna petición llega a producción.
 Comprueban archivo real mediante worker, filtros, limpieza, reimportación, rechazo
 de viewer, archivo malformado y diseño móvil sin desbordamiento de página.
 
@@ -120,7 +112,7 @@ No se incluye una copia del libro en los tests ni se escribe en él.
 Vite conserva el aviso de chunk grande de la aplicación existente y la advertencia
 de su API CJS. El visor se carga de forma diferida y el parser va en un worker separado.
 
-## Archivos del parser y preview original
+## Inventario exacto de cambios
 
 Archivos nuevos:
 
@@ -149,18 +141,18 @@ Archivos modificados:
 - `.gitignore`: libro privado y artefactos de build/tests. Se conserva la línea
   previa de la usuaria `/data/*.xlsx1`; se añade la exclusión correcta de .xlsx.
 
-El inventario completo de la ampliación, incluidas migraciones preparadas y panel VEO
-en perfiles, está en VEO_ANALYTICS.md. Las utilidades de asistencia/evaluación de Fase 1
-no se modifican. Los cambios previos de dist no pertenecen a esta función.
+No se modifican SQL, migraciones, políticas, datos, páginas operativas ni utilidades
+de asistencia/evaluación. Los cambios previos de dist no pertenecen a esta función.
+No se ha hecho commit, push, merge, cambio de rama ni despliegue.
 
 ## Antes de conectar Supabase
 
-Revisar y aplicar manualmente los dos ficheros descritos en VEO_ANALYTICS.md, comprobar
-roles reales y confirmar UUIDs (incluidos Isra/Pol y De Lima) y sessions.id en el importador.
-Publicación, revisiones y retirada transaccional están implementadas y probadas en una
-base aislada. J1–J4 no son necesarios para primas: la regla aprobada inicia en J5.
-Los importes dependen de la integridad de J5 en adelante y no constituyen pagos.
+Falta aprobar: correspondencias con UUIDs reales (incluidos Isra/Pol y De Lima),
+vínculo del partido a sessions.id, esquema aditivo y RLS, permisos de publicación,
+historial anterior para contadores de primas, correcciones/revisiones y retirada
+transaccional de lotes. Los importes actuales son orientativos sobre el historial
+seleccionado; no constituyen pagos ni saldos definitivos.
 
 Asistencia, convocatoria, evaluación del entrenador, tarjetas, sanciones y Solo
-registros permanecen separados: minutos o acciones VEO no escriben ni infieren
-estados en esas entidades. No se ha integrado la API VEO; la fuente es el Excel aprobado.
+registros permanecen sepyarados: minutos o acciones VEO no escriben ni infieren
+estados en esas entidades. No se ha implementado publicación ni integración VEO API.
