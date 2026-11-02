@@ -1,0 +1,45 @@
+/* Opt-in only. Never put these variables on :root or alias legacy tokens. */
+.premium-ui {
+  --ds-navy: #122c55;
+  --ds-primary: #245bb2;
+  --ds-primary-hover: #194787;
+  --ds-primary-active: #122c55;
+  --ds-background: #f5f7fa;
+  --ds-surface: #ffffff;
+  --ds-surface-subtle: #edf2f8;
+  --ds-text: #17243a;
+  --ds-secondary: #536176;
+  --ds-border: #dce3ec;
+  --ds-control-border: #7b899c;
+  --ds-accent: #dfff45;
+  --ds-info-soft: #eaf1fc;
+  --ds-success: #17613b;
+  --ds-success-soft: #e5f5eb;
+  --ds-danger: #a12626;
+  --ds-danger-soft: #fff0f0;
+  --ds-warning: #79510b;
+  --ds-warning-soft: #fff4d6;
+  --ds-focus: #245bb2;
+  --ds-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ds-text-small: .875rem;
+  --ds-text-body: 1rem;
+  --ds-text-title: clamp(1.75rem, 4vw, 2.5rem);
+  --ds-leading: 1.5;
+  --ds-weight-normal: 400;
+  --ds-weight-medium: 500;
+  --ds-weight-semibold: 600;
+  --ds-space-1: .25rem;
+  --ds-space-2: .5rem;
+  --ds-space-3: .75rem;
+  --ds-space-4: 1rem;
+  --ds-space-6: 1.5rem;
+  --ds-space-8: 2rem;
+  --ds-space-12: 3rem;
+  --ds-radius-control: .75rem;
+  --ds-radius-card: 1.125rem;
+  --ds-radius-pill: 999px;
+  --ds-shadow-card: 0 4px 18px #122c550a;
+  --ds-shadow-hover: 0 6px 20px #122c5512;
+  --ds-motion: 160ms;
+  --ds-target: 2.75rem;
+}
