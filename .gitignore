@@ -13,3 +13,9 @@ node_modules/
 /.veo-build-check/
 /.veo-test-artifacts/
 /.phase4-test-artifacts/
+
+# Generated metadata and test reports
+.DS_Store
+/coverage/
+/playwright-report/
+/test-results/
