@@ -8,7 +8,9 @@
     "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs",
     "test:phase4-ui": "playwright test -c tests/phase4.playwright.config.cjs",
     "test:design-ui": "playwright test -c tests/design-system.playwright.config.cjs",
-    "test:shell-ui": "playwright test -c tests/shell.playwright.config.cjs"
+    "test:shell-ui": "playwright test -c tests/shell.playwright.config.cjs",
+    "test:batch4": "node --test tests/batch4.test.cjs tests/batch4-database.test.cjs",
+    "test:batch4-ui": "playwright test -c tests/batch4.playwright.config.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
