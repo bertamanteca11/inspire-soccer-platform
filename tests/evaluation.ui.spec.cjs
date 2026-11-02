@@ -1,7 +1,7 @@
 const {test,expect}=require('@playwright/test');const fs=require('node:fs');const ts=require('typescript');
 require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,file);
 const fixture=require('./evaluation.fixture.ts');
-async function setup(page,{draft=false,denied=false,duplicateAttendance=false,slowConfirmation=false}={}){
+async function setup(page,{draft=false,denied=false,duplicateAttendance=false,slowConfirmation=false,alertCount=0,partialCallups=false,emptyCallups=false}={}){
   const writes=[],unexpected=[],errors=[];let evaluations=draft?[]:structuredClone(fixture.sportEvaluations);
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',async route=>{
@@ -28,7 +28,7 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
       unexpected.push('write '+table);return route.abort();
     }
     const visits=duplicateAttendance?[...fixture.sportAttendance,{...fixture.sportAttendance[0],id:'different-attendance-id'}]:fixture.sportAttendance;
-    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:[]};
+    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:emptyCallups?[]:partialCallups?fixture.sportCallups.slice(0,1):fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:Array.from({length:alertCount},(_,i)=>({id:'suspension-'+i,display_name:'Suspended player '+i,matches_remaining:20-i}))};
     if(!Object.hasOwn(tables,table)){unexpected.push(table);return route.abort();}
     let rows=[...tables[table]];
     for(const key of ['id','session_id','player_id']){const f=url.searchParams.get(key);if(f?.startsWith('eq.'))rows=rows.filter(r=>r[key]===f.slice(3));}
@@ -137,4 +137,70 @@ test('confirmation disables edits while validating and submits the session only 
   await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toBeVisible();
   expect(state.writes.filter(w=>w.table==='sessions')).toHaveLength(1);
   expect(state.evaluations).toEqual(fixture.sportEvaluations);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+for(const role of ['admin','coach','viewer']) for(const width of [320,360,390]) test(`Home cleanup ${role} at ${width}px preserves shortcut destinations and session`,async({page},info)=>{
+  const state=await setup(page); await page.setViewportSize({width,height:740}); await page.goto(`/phase4-test?mode=home&shell=1&long=1&role=${role}`);
+  await expect(page.locator('.club-header h1')).toHaveText('Inicio');
+  await expect(page.locator('.club-header')).not.toContainText('Hospitalense');
+  const shortcuts=page.getByRole('navigation',{name:'Acciones de la sesión seleccionada'});
+  await expect(shortcuts).toHaveCount(1);
+  expect(await shortcuts.evaluate(node=>node.parentElement.previousElementSibling?.classList.contains('hero-card'))).toBe(true);
+  await expect(shortcuts.getByRole('button')).toHaveText(role==='viewer'?['Asistencia','Evaluar']:['Convocatoria','Asistencia','Evaluar']);
+  await expect(page.getByRole('button',{name:'Preparar convocatoria',exact:true})).toHaveCount(0);
+  await expect(page.getByText('Rendimiento oficial desde el 14/10/2026',{exact:true})).toBeVisible();
+  for(const [name,destination] of (role==='viewer'?[['Asistencia','attendance'],['Evaluar','evaluation']]:[['Convocatoria','callup'],['Asistencia','attendance'],['Evaluar','evaluation']])){
+    await shortcuts.getByRole('button',{name,exact:true}).click();
+    await expect(page.getByTestId('requested-destination')).toHaveText(destination);
+    await expect(page.getByTestId('preserved-session')).toHaveText(fixture.sportSessions[1].id);
+  }
+  if(role==='admin'&&width===360)await page.screenshot({path:info.outputPath('home-cleanup-360.png'),fullPage:true});
+  const overflow=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(node=>node.getBoundingClientRect().right>innerWidth+1).slice(0,6).map(node=>node.tagName+'.'+node.className));
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),JSON.stringify(overflow)).toBe(true);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('Home alerts expand 2 to 5 to 10 and beyond without losing source order or content',async({page})=>{
+  const state=await setup(page,{alertCount:3}); await page.setViewportSize({width:360,height:740}); await page.goto('/phase4-test?mode=home&shell=1&alerts=1');
+  const list=page.locator('.home-alert-list'); await expect(list.locator(':scope > div')).toHaveCount(2);
+  await expect(list).toContainText('Suspended player 0'); await expect(list).toContainText('Suspended player 1');
+  await page.getByRole('button',{name:'Ver 5 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(5);
+  await page.getByRole('button',{name:'Ver 10 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(10);
+  await page.getByRole('button',{name:'Ver 14 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(14);
+  await expect(list.locator('strong')).toHaveText([...Array.from({length:3},(_,i)=>'Suspended player '+i),...Array.from({length:11},(_,i)=>'Card player '+i)]);
+  await expect(list).toContainText('20 partido(s) sanción');
+  await page.getByRole('button',{name:'Mostrar solo 2'}).click(); await expect(list.locator(':scope > div')).toHaveCount(2);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+for(const [mode,title] of [['callup','Convocatoria'],['attendance','Asistencia'],['evaluation','Evaluación']]) test(`${mode} has session context inside content and a title-only global header`,async({page})=>{
+  const state=await setup(page); await page.setViewportSize({width:320,height:740}); await page.goto(`/phase4-test?mode=${mode}&shell=1&long=1`);
+  await expect(page.locator('.club-header h1')).toHaveText(title);
+  await expect(page.locator('.club-main .page-title h2')).toHaveCount(1);
+  await expect(page.locator('.club-main .page-title h2')).toContainText("vs L'Hospitalense");
+  await expect(page.locator('.club-main .page-title h2')).not.toContainText(title+':');
+  await expect(page.locator('.club-header')).not.toContainText('Partido domingo');
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('callup missing-row semantics remain unchanged while suspensions expand progressively',async({page})=>{
+  const state=await setup(page,{partialCallups:true,alertCount:7}); await page.goto('/phase4-test?mode=callup&shell=1&draft-callup=1');
+  await expect(page.getByRole('button',{name:'Sin registro',exact:true})).toHaveCount(4);
+  await expect(page.locator('.home-alert-list > div')).toHaveCount(2);
+  await page.getByRole('button',{name:'Ver 5 avisos',exact:true}).click(); await expect(page.locator('.home-alert-list > div')).toHaveCount(5);
+  await page.getByRole('button',{name:'Ver 7 avisos',exact:true}).click(); await expect(page.locator('.home-alert-list > div')).toHaveCount(7);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('fresh empty unconfirmed callup still shows draft defaults without persisting them',async({page})=>{
+  const state=await setup(page,{emptyCallups:true}); await page.goto('/phase4-test?mode=callup&draft-callup=1');
+  await expect(page.getByRole('button',{name:'Convocado',exact:true})).toHaveCount(5);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('evaluation read failures retain selected-session context and visible errors',async({page})=>{
+  const state=await setup(page,{denied:true}); await page.setViewportSize({width:360,height:740}); await page.goto('/phase4-test?mode=evaluation&shell=1&long=1');
+  await expect(page.getByRole('alert')).toContainText('No se pudo verificar la elegibilidad');
+  await expect(page.locator('.club-main .page-title h2')).toContainText("vs L'Hospitalense");
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });

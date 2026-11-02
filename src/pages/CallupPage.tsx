@@ -5,7 +5,9 @@ import { supabase } from '../supabase';
 import type { Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
 import { translatePosition, translateStatus } from '../utils/formatters';
-import { Card, PageTitle } from '../components/ui';
+import { Card } from '../components/ui';
+import { SessionHeading } from '../components/SessionHeading';
+import { ProgressiveAlerts } from '../components/ProgressiveAlerts';
 
 type CallupRow = {
   id: string;
@@ -159,18 +161,18 @@ export function CallupPage({ role, session, reload, setError }: {
     setSaving(false);
   }
 
-  if (loading) return <div className="stack"><PageTitle title={`Convocatoria: ${session.name}`} subtitle="Cargando jugadores..." /><Card><p>Cargando convocatoria...</p></Card></div>;
+  if (loading) return <div className="stack"><SessionHeading session={session}/><Card><p>Cargando convocatoria...</p></Card></div>;
 
   const calledCount = players.filter(p => drafts[p.id] && drafts[p.id]!.status !== 'not_called').length;
   const savedIds = new Set(callups.map(c => c.player_id));
   const missingCount = players.filter(p => !savedIds.has(p.id)).length;
 
   return <div className="stack">
-    <PageTitle title={`Convocatoria: ${session.name}`} subtitle="Marca quién está convocado. Las asistencias, evaluaciones y comentarios se conservan aunque cambies una convocatoria." />
+    <SessionHeading session={session}/>
     {suspensions.length > 0 && <Card className="warning">
       <AlertTriangle size={18} />
       <div><strong>Sanciones activas (revisar según la fecha del partido)</strong>
-        {suspensions.map((s: any) => <p key={s.id}>{s.display_name}: {s.matches_remaining} partido(s)</p>)}
+        <ProgressiveAlerts items={suspensions.map((s: any) => ({key:s.id,content:<p>{s.display_name}: {s.matches_remaining} partido(s)</p>}))}/>
       </div>
     </Card>}
     {missingCount > 0 && callups.length > 0 && <Card className="warning">

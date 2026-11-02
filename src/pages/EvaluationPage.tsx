@@ -10,6 +10,7 @@ import { isFieldNA, evaluationTotal, fieldScore } from '../utils/evaluationScore
 import { eligibilityReason, distinctRows, isSportingActivity, newEvaluationDraft, ratingLimit, type EligibilityRow } from '../utils/evaluationEligibility';
 import { readPerformancePages } from '../lib/performance';
 import { Card } from '../components/ui';
+import { SessionHeading } from '../components/SessionHeading';
 
 const matchRatingFields = [
   ['tactical_discipline', 'Disciplina táctica'],
@@ -185,13 +186,13 @@ export function EvaluationPage({
     if (index >= evaluablePlayers.length) setIndex(0);
   }, [index, evaluablePlayers.length]);
 
-  if (!session.callup_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la convocatoria.</p></Card></div>;
-  if (!session.attendance_confirmed) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>{session.name}</h2><p>Primero hay que confirmar la asistencia. Así los ausentes quedan fuera de evaluación y no cuentan en las medias.</p></Card></div>;
-  if (eligibilityLoading) return <Card><p role="status">Verificando convocatoria y asistencia…</p></Card>;
-  if (role !== 'admin' && role !== 'coach') return <Card><p>Solo lectura: consulta las evaluaciones en Resumen o Historial.</p></Card>;
-  if (eligibilityError) return <Card><p role="alert">No se pudo verificar la elegibilidad: {eligibilityError}</p></Card>;
-  if (!isSportingActivity(session) || !['planned','completed'].includes(session.status)) return <Card><p role="alert">Esta sesión no admite evaluación operativa. Sus registros se conservan en el historial.</p></Card>;
-  if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><Card><p className="kicker">Evaluación</p><h2>No hay jugadores para evaluar</h2><p>No hay participantes con elegibilidad verificable. Revisa convocatoria, asistencia y posibles evaluaciones duplicadas. Los originales se conservan.</p></Card></div>;
+  if (!session.callup_confirmed) return <div className="stack"><SessionHeading session={session}/><Card><p>Primero hay que confirmar la convocatoria.</p></Card></div>;
+  if (!session.attendance_confirmed) return <div className="stack"><SessionHeading session={session}/><Card><p>Primero hay que confirmar la asistencia.</p></Card></div>;
+  if (eligibilityLoading) return <div className="stack"><SessionHeading session={session}/><Card><p role="status">Verificando convocatoria y asistencia…</p></Card></div>;
+  if (role !== 'admin' && role !== 'coach') return <div className="stack"><SessionHeading session={session}/><Card><p>Solo lectura: consulta las evaluaciones en Resumen o Historial.</p></Card></div>;
+  if (eligibilityError) return <div className="stack"><SessionHeading session={session}/><Card><p role="alert">No se pudo verificar la elegibilidad: {eligibilityError}</p></Card></div>;
+  if (!isSportingActivity(session) || !['planned','completed'].includes(session.status)) return <div className="stack"><SessionHeading session={session}/><Card><p role="alert">Esta sesión no admite evaluación operativa. Sus registros se conservan en el historial.</p></Card></div>;
+  if (evaluablePlayers.length === 0 && !adminRecordsMode) return <div className="stack"><SessionHeading session={session}/><Card><h2>No hay jugadores para evaluar</h2><p>No hay participantes con elegibilidad verificable. Revisa convocatoria, asistencia y posibles evaluaciones duplicadas. Los originales se conservan.</p></Card></div>;
 
   async function ensureEval(target: Player = player): Promise<Evaluation | null> {
     if (!adminRecordsMode && eligibilityReason(session.id,target.id,callups,attendance)) { setError('No se ha verificado la elegibilidad del jugador.'); return null; }
@@ -509,16 +510,15 @@ export function EvaluationPage({
 
   return (
     <div className="stack">
-      <Card><p>Solo se evalúa a jugadores convocados y evaluables con asistencia deportiva registrada. Las puntuaciones no seleccionadas no reciben un 3 automático.</p>
-        {session.type === 'training' && <p>Se muestran las cinco calidades de la fórmula almacenada. La regla de cuatro o cinco cualidades de entreno sigue pendiente de confirmación; no se reescriben notas históricas.</p>}
+      <SessionHeading session={session}/>
+      <Card><details><summary>Criterios de evaluación</summary><p>Solo se evalúa a jugadores convocados y evaluables con asistencia deportiva registrada. Las puntuaciones no seleccionadas no reciben un 3 automático.</p>
+        {session.type === 'training' && <p>Se conservan las cinco calidades y las notas históricas.</p>}</details>
         {!!localEvaluations.filter(e => !evaluablePlayers.some(p => p.id === e.player_id)).length && <p role="alert">Hay evaluaciones no elegibles o duplicadas fuera del cómputo. Se conservan para revisión histórica.</p>}
       </Card>
       {isAdmin && locked && !recordsOnlyCompleted && <Card>
         <p className="muted">Si este es un partido histórico sin puntuaciones, pulsa «Reabrir evaluación» para acceder a «Solo registros». Reabrir no borra comentarios, tarjetas, asistencia ni N/A.</p>
       </Card>}
       {isAdmin && !locked && <Card>
-        <p className="kicker">Evaluación</p>
-        <h2>{session.name}</h2>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,padding:5,marginTop:16,background:'#e4e7e3',borderRadius:18}}>
           <button type="button" disabled={confirming} onClick={() => { if (recordPlayer && dirtyComments[recordPlayer.id]) { setError('Guarda el comentario antes de cambiar de modo.'); return; } setAdminRecordsMode(false); }}
             style={{border:'none',borderRadius:13,padding:'12px 8px',fontWeight:700,cursor:'pointer',background:!adminRecordsMode?'#efffbb':'transparent',color:'#111'}}>
@@ -576,7 +576,6 @@ export function EvaluationPage({
         {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
       </> : <>
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
-        {(!isAdmin || locked) && <><p className="kicker">Evaluación</p><h2>{session.name}</h2></>}
 
         {locked ? (
           <div className="stack">

@@ -3,7 +3,6 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import type { Attendance, Evaluation, Player, Role } from './types';
 import type { AppSession, PlayerCardTotal, Tab } from './utils/appTypes';
-import { buildSessionLabel } from './utils/formatters';
 import { getNextAvailableSession } from './lib/data';
 import { ACTIVE_SESSION_STATUSES, isActiveSession } from './utils/sessionArchive';
 import { ApplicationShell } from './components/shell/ApplicationShell';
@@ -198,16 +197,14 @@ if (playerIds.length > 0) {
   }, [role, tab]);
 
   const headerTitle = getHeaderTitle(tab);
-  const headerSubtitle = tab === 'home'
-    ? nextSession ? buildSessionLabel(nextSession) : 'Sin próxima sesión'
-    : ['sessions', 'callup', 'attendance', 'evaluation', 'injuries'].includes(tab) && selectedSession ? buildSessionLabel(selectedSession) : '';
+
 
   if (loadingData) {
     return <div className="app-shell"><div className="app"><main><Card><p>Cargando datos...</p></Card></main></div></div>;
   }
 
   return (
-    <ApplicationShell role={role} tab={tab} setTab={setTab} title={headerTitle} context={headerSubtitle} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
+    <ApplicationShell role={role} tab={tab} setTab={setTab} title={headerTitle} selectedSessionLabel={selectedSession && ['home', 'sessions', 'callup', 'attendance', 'evaluation'].includes(tab) ? selectedSession.name : undefined} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
           {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
           {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
           {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage role={role} reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} onArchiveChange={onArchiveChange} onViewHistory={id => { setSummarySessionId(id); setTab('summary'); }} />}
@@ -235,7 +232,7 @@ if (playerIds.length > 0) {
 
 function getHeaderTitle(tab: Tab) {
   const map: Record<Tab, string> = {
-    home: 'Inspire Soccer',
+    home: 'Inicio',
     players: 'Jugadores',
     sessions: 'Sesiones',
     callup: 'Convocatoria',

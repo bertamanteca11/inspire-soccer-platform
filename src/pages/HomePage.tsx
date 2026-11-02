@@ -10,7 +10,9 @@ import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession, PlayerCardTotal, Tab } from '../utils/appTypes';
 import { buildSessionLabel } from '../utils/formatters';
 import { getCardWarnings } from '../utils/stats';
-import { Action, Card } from '../components/ui';
+import { Card } from '../components/ui';
+import { SessionWorkflow } from '../components/shell/SessionWorkflow';
+import { ProgressiveAlerts } from '../components/ProgressiveAlerts';
 
 const LOGO_URL = '/assets/logo.png';
 
@@ -41,6 +43,7 @@ export function HomePage({
   setTab: (tab: Tab) => void;
 }) {
   const [performanceError, setPerformanceError] = useState('');
+  const [excludedCount, setExcludedCount] = useState(0);
   const [topMode, setTopMode] = useState<'matches' | 'trainings'>('matches');
   const [topMatches, setTopMatches] = useState<TopPlayer[]>([]);
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
@@ -49,7 +52,7 @@ export function HomePage({
   const [sessionCounts, setSessionCounts] = useState({ id: '', evaluated: 0, eligible: 0 });
   const performanceRequest = useRef(0);
   const evaluatedCount = sessionCounts.id === selectedSession?.id ? sessionCounts.evaluated : 0;
-  const cardWarnings = getCardWarnings(cardTotals).slice(0, 8);
+  const cardWarnings = getCardWarnings(cardTotals);
   const sessionIsToday = nextSession?.session_date === new Date().toISOString().slice(0, 10);
   const recordsOnlyDone = Boolean((selectedSession as (AppSession & { records_only_confirmed?: boolean }) | null)?.records_only_confirmed);
   const evaluationDone = !!selectedSession?.evaluation_confirmed || (sessionCounts.id === selectedSession?.id && sessionCounts.eligible > 0 && evaluatedCount >= sessionCounts.eligible);
@@ -69,10 +72,10 @@ export function HomePage({
       if (request !== performanceRequest.current) return;
       const eligible = new Set(result.callups.filter(c => c.player_id && c.session_id && c.session_id === selectedSession?.id && !eligibilityReason(c.session_id,c.player_id,result.callups,result.attendance)).map(c => c.player_id));
       setSessionCounts({ id: selectedSession?.id || '', evaluated: result.evaluations.filter(e => e.session_id === selectedSession?.id).length, eligible: eligible.size });
-      setPerformanceError(result.excluded.length ? result.excluded.length + ' evaluaciones excluidas por alcance, elegibilidad o datos incompletos; originales conservados.' : '');
+      setPerformanceError(''); setExcludedCount(result.excluded.length);
       setTopMatches(buildTopRanking(result.evaluations.filter(r => r.sessions.type !== 'training')));
       setTopTrainings(buildTopRanking(result.evaluations.filter(r => r.sessions.type === 'training')));
-    } catch (failure) { if(request===performanceRequest.current){setPerformanceError(String(failure)); setTopMatches([]); setTopTrainings([]);setSessionCounts({id:'',evaluated:0,eligible:0});} }
+    } catch (failure) { if(request===performanceRequest.current){setPerformanceError(String(failure)); setExcludedCount(0); setTopMatches([]); setTopTrainings([]);setSessionCounts({id:'',evaluated:0,eligible:0});} }
   }
 
   async function loadSuspensions() {
@@ -89,7 +92,7 @@ export function HomePage({
   const activeTop = topMode === 'matches' ? topMatches : topTrainings;
 
   return (
-    <div className="stack">
+    <div className="stack home-dashboard">
       <Card className="hero-card">
         <div className="hero-inner">
           <div>
@@ -100,6 +103,8 @@ export function HomePage({
           <div className="hero-mark" aria-hidden="true"><Shield size={42}/><span>IS</span></div>
         </div>
       </Card>
+
+      <SessionWorkflow role={role} tab="home" setTab={setTab}/>
 
       {role === 'admin' && <button className="weekly-shortcut" onClick={()=>setTab('intelligence')}><span className="weekly-shortcut-icon"><Shield size={23}/></span><span><strong>Seguimiento semanal</strong><small>Rendimiento, alertas y notas privadas del equipo</small></span><ChevronRight size={20}/></button>}
       <Card>
@@ -127,28 +132,21 @@ export function HomePage({
             <AlertTriangle size={18} />
           </div>
 
-          {suspensions.length > 0 && (
-            <div className="suspension-list">
-              {suspensions.map((s: any) => (
-                <div key={s.id} className="suspension-item">
+          <ProgressiveAlerts items={[
+              ...suspensions.map((s: any) => ({ key: 'suspension-' + s.id, content:
+                <div className="suspension-item">
                   <Ban size={16} />
                   <strong>{s.display_name}</strong>
                   <span>{s.matches_remaining} partido(s) sanción</span>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {cardWarnings.length > 0 && (
-            <div className="card-warning-grid">
-              {cardWarnings.map((c: PlayerCardTotal) => (
-                <div key={c.player_id} className={Number(c.yellow_cards) >= 3 || Number(c.red_cards) > 0 ? 'card-warning-item danger' : 'card-warning-item'}>
+              })),
+              ...cardWarnings.map((c: PlayerCardTotal) => ({ key: 'card-' + c.player_id, content:
+                <div className={Number(c.yellow_cards) >= 3 || Number(c.red_cards) > 0 ? 'card-warning-item danger' : 'card-warning-item'}>
                   <strong>{c.display_name}</strong>
                   <span>{c.yellow_cards} 🟨 {Number(c.red_cards) > 0 ? `· ${c.red_cards} 🟥` : ''}</span>
                 </div>
-              ))}
-            </div>
-          )}
+              }))
+          ]}/>
         </Card>
       )}
 
@@ -169,6 +167,7 @@ export function HomePage({
 
         <p className="muted">{OFFICIAL_PERFORMANCE_LABEL}</p>
         {performanceError && <p role="alert">Rendimiento operativo: {performanceError}</p>}
+        {!!excludedCount && <details><summary>Evaluaciones excluidas: {excludedCount}</summary><p>Fuera de alcance, no elegibles o incompletas. Los originales se conservan.</p></details>}
         {activeTop.length > 0 ? (
           activeTop.map((p, index) => (
             <div className="top-row" key={p.id}>
@@ -182,9 +181,6 @@ export function HomePage({
         )}
       </Card>
 
-      {(role === 'admin' || role === 'coach') && <Action label="Preparar convocatoria" onClick={() => setTab('callup')} />}
-      <Action label="Pasar asistencia" onClick={() => setTab('attendance')} />
-      <Action label="Evaluar jugadores" onClick={() => setTab('evaluation')} />
     </div>
   );
 }

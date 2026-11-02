@@ -6,7 +6,8 @@ import { supabase } from '../supabase';
 import type { Attendance, Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
 import { translatePosition } from '../utils/formatters';
-import { Card, PageTitle } from '../components/ui';
+import { Card } from '../components/ui';
+import { SessionHeading } from '../components/SessionHeading';
 
 const attendanceOptions = [
   ['present', 'Presente'],
@@ -191,7 +192,7 @@ export function AttendancePage({
   if (!session.callup_confirmed) {
     return (
       <div className="stack">
-        <PageTitle title={`Asistencia: ${session.name}`} subtitle="Primero hay que confirmar la convocatoria." />
+        <SessionHeading session={session} subtitle="Primero hay que confirmar la convocatoria."/>
         <Card>
           <p className="kicker">Pendiente</p>
           <h2>Convocatoria no confirmada</h2>
@@ -203,7 +204,7 @@ export function AttendancePage({
 
   return (
     <div className="stack">
-      <PageTitle title={`Asistencia: ${session.name}`} subtitle="Puedes guardar cambios sin cerrar la asistencia. Confirmar asistencia la bloquea para el coach." />
+      <SessionHeading session={session} subtitle="Guardar conserva cambios. Confirmar bloquea la edición del entrenador."/>
 
       <Card className={locked ? 'locked-card confirmed-card' : ''}>
         <p className="kicker">Estado</p>
@@ -229,7 +230,7 @@ export function AttendancePage({
       {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
       {rosterLoading && <p role="status">Cargando plantilla y convocatoria…</p>}
       {rosterError && <p role="alert">No se puede guardar sin verificar la plantilla: {rosterError}</p>}
-      <Card><p className="muted">Los jugadores sin asistencia almacenada aparecen como «Sin registrar». No se consideran presentes ni ausentes. Selecciona explícitamente la situación de cada jugador antes de guardar o confirmar; también la de los no convocados. Los registros y notas existentes se conservan.</p></Card>
+      <Card><p className="muted">«Sin registrar» no suma presencia ni ausencia. Revisa el estado de cada jugador, incluidos los no convocados. Las notas existentes se conservan.</p></Card>
       {attendancePlayers.map((p: Player) => {
         const draft = drafts[p.id] || attendanceDraft(attendance || [], session.id, p.id);
         const needs = attendanceNeedsExplanation.includes(draft.status);

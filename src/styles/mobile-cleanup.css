@@ -1,0 +1,16 @@
+.home-alert-list { display: grid; gap: 8px; margin: 8px 0; }
+.home-dashboard .hero-card h2 { overflow-wrap: anywhere; }
+.home-dashboard .club-session-workflow { margin-bottom: 0; }
+.home-dashboard summary { cursor: pointer; padding: 10px 0; min-height: 44px; }
+.home-dashboard .top-row strong { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 767px), (max-height: 499px) {
+  .home-dashboard .hero-card { min-height: 0; padding: 16px; }
+  .home-dashboard .hero-card h2 { font-size: 1.5rem; line-height: 1.15; margin-bottom: 6px; }
+  .home-dashboard .hero-mark { display: none; }
+  /* Legacy mobile CSS forces these tiles into one column. Scope this exception
+     to Home; counts, labels and workflow states remain unchanged. */
+  .home-dashboard .progress-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px; }
+  .home-dashboard .progress-card { padding: 10px 5px; min-width: 0; }
+  .home-dashboard .progress-card span { font-size: .75rem; overflow-wrap: anywhere; }
+  .home-dashboard .progress-card small { display: block; font-size: .75rem; }
+}

@@ -19,15 +19,20 @@ function Harness() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'password' | 'magic'>('password');
+  const [localSaves, setLocalSaves] = useState(0);
   if (query.has('login')) return <LoginPanel logoUrl="/logo.png" email={email} setEmail={setEmail} password={password} setPassword={setPassword} mode={mode} setMode={setMode} onSubmit={event => event.preventDefault()} message="" error=""/>;
-  const titles: Partial<Record<Tab,string>> = { home: 'Inspire Soccer', sessions: 'Sesiones', players: 'Jugadores', summary: 'Resumen', intelligence: 'Seguimiento semanal' };
+  const titles: Partial<Record<Tab,string>> = { home: 'Inicio', sessions: 'Sesiones', players: 'Jugadores', summary: 'Resumen', intelligence: 'Seguimiento semanal', callup:'Convocatoria', attendance:'Asistencia', evaluation:'Evaluación' };
   const title = titles[tab] || tab;
-  return <ApplicationShell role={role} tab={tab} setTab={setTab} title={title} context={tab === 'home' || tab === 'attendance' ? 'Sesión sintética · 23 octubre · 19:00' : undefined} onLogout={() => setLogout(true)}>
+  const longSession = 'Sesión sintética con un nombre extraordinariamente largo contra un rival con denominación completa y jugadores invitados · 23 octubre · 19:00';
+  return <ApplicationShell role={role} tab={tab} setTab={setTab} title={title}
+    selectedSessionLabel={!query.has('no-session') && ['home','sessions','callup','attendance','evaluation'].includes(tab) ? query.has('long') ? longSession : 'Sesión sintética seleccionada' : undefined}
+    onLogout={() => setLogout(true)}>
     <div className="stack">
       <PageTitle title={title} subtitle="Solo datos sintéticos. Ningún servicio operativo está conectado."/>
-      <Card><p className="kicker">Local fixture</p><h2>Sesión de referencia</h2><p data-testid="selected-session">{session}</p><p data-testid="current-tab">{tab}</p><label>Nota local<input value={note} onChange={event => setNote(event.target.value)}/></label><button type="button" className="secondary" onClick={() => setModal(true)}>Abrir diálogo existente</button>{logout && <p role="status">Salida local solicitada</p>}</Card>
+      <Card><p className="kicker">Local fixture</p><h2>{query.has('long') ? longSession : 'Sesión de referencia'}</h2><p data-testid="selected-session">{session}</p><p data-testid="current-tab">{tab}</p><label>Nota local<input value={note} onChange={event => setNote(event.target.value)}/></label><button type="button" className="secondary" onClick={() => setModal(true)}>Abrir diálogo existente</button>{logout && <p role="status">Salida local solicitada</p>}</Card>
       <Card><h2>Rendimiento sintético</h2><div className="top-row"><span className="rank">#1</span><strong>Jugador de referencia</strong><span>4.20</span></div><p className="muted">Valor ilustrativo; no se calcula ni guarda.</p></Card>
       <div className="veo-module"><div className="veo-hero"><h2>Referencia visual VEO</h2><p>Solo estilos, sin proveedor ni datos VEO.</p></div></div>
+      {query.has('keyboard') && <><div style={{height:500}} aria-hidden="true"/><form onSubmit={event => { event.preventDefault(); setLocalSaves(value => value + 1); }}><label>Comentario largo<textarea value={note} onChange={event => setNote(event.target.value)}/></label><p role="status">Guardados locales: {localSaves}</p><button type="submit" className="primary">Guardar ejemplo local</button></form></>}
       {modal && <Modal title="Diálogo existente" onClose={() => setModal(false)}><p>Controles existentes por encima de la navegación.</p></Modal>}
     </div>
   </ApplicationShell>;

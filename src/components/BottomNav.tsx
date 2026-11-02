@@ -4,7 +4,7 @@ import type { Role } from '../types';
 import type { Tab } from '../utils/appTypes';
 import { PremiumScope } from './premium/primitives';
 import { ClubCrest } from './shell/ClubCrest';
-import { navigationGroups, primaryTabs, visibleDestinations } from './shell/navigation';
+import { navigationGroups, primaryTabs, SIDEBAR_MEDIA, visibleDestinations } from './shell/navigation';
 import '../styles/application-shell.css';
 
 export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab: (tab: Tab) => void }) {
@@ -25,11 +25,14 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
     return () => { document.body.style.overflow = previous; };
   }, [moreOpen]);
   useEffect(() => {
-    const media = window.matchMedia('(min-width: 768px)');
+    const media = window.matchMedia(SIDEBAR_MEDIA);
     const resize = () => {
       if (media.matches && dialog.current?.open) {
         dialog.current.close(); setMoreOpen(false);
         document.querySelector<HTMLButtonElement>('.club-sidebar button[aria-current="page"]')?.focus();
+      }
+      if (!media.matches && document.activeElement?.closest('.club-sidebar')) {
+        (document.querySelector<HTMLButtonElement>('.club-mobile-nav button[aria-current="page"]') || trigger.current)?.focus();
       }
     };
     media.addEventListener('change', resize);
@@ -61,7 +64,7 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }}
-      onCancel={() => setMoreOpen(false)} onClose={() => { setMoreOpen(false); if (!window.matchMedia('(min-width: 768px)').matches) trigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget) close(); }}>
+      onCancel={() => setMoreOpen(false)} onClose={() => { setMoreOpen(false); if (!window.matchMedia(SIDEBAR_MEDIA).matches) trigger.current?.focus(); }} onClick={event => { if (event.target === event.currentTarget) close(); }}>
       <div className="club-more-heading"><h2 id="club-more-title">Más herramientas</h2><button type="button" aria-label="Cerrar herramientas" autoFocus onClick={close}><X size={22} aria-hidden="true"/></button></div>
       <nav aria-label="Más herramientas">{secondary.map(item => {
         const Icon = item.icon;
