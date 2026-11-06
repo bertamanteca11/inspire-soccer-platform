@@ -17,9 +17,10 @@ export const destinations = [
   { tab: 'intelligence', label: 'Seguimiento semanal', icon: Shield, group: 'Análisis e informes', staff: true, adminOnly: true },
   { tab: 'reports', label: 'Informes', icon: FileText, group: 'Análisis e informes', staff: true },
   { tab: 'history', label: 'Histórico', icon: History, group: 'Análisis e informes', staff: true },
-] satisfies { tab: Tab; label: string; icon: typeof Activity; group: string; staff: boolean; adminOnly?: boolean }[];
-export function visibleDestinations(role: Role) {
-  return destinations.filter(item => ('adminOnly' in item && item.adminOnly) ? role === 'admin' : !item.staff || role === 'admin' || role === 'coach');
+  { tab: 'staff', label: 'Staff', icon: Shield, group: 'Operativa del equipo', staff: true, privateStaff: true },
+] satisfies { tab: Tab; label: string; icon: typeof Activity; group: string; staff: boolean; adminOnly?: boolean; privateStaff?: boolean }[];
+export function visibleDestinations(role: Role, canAccessStaff = false) {
+  return destinations.filter(item => 'privateStaff' in item && item.privateStaff ? canAccessStaff && ['admin','coach'].includes(role) : ('adminOnly' in item && item.adminOnly) ? role === 'admin' : !item.staff || role === 'admin' || role === 'coach');
 }
 export const primaryTabs: Tab[] = ['home', 'players', 'sessions', 'summary'];
 // Match application-shell.css: a wide but short phone still uses mobile navigation.

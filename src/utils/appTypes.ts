@@ -1,6 +1,6 @@
 import type { Session } from '../types';
 
-export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'standouts'|'history'|'intelligence'|'reports'|'veo';
+export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'standouts'|'history'|'intelligence'|'reports'|'veo'|'staff';
 
 export type AppSession = Session & {
   locked_at?: string | null;

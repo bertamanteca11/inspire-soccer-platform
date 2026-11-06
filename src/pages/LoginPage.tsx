@@ -22,7 +22,7 @@ export function LoginPage({ logoUrl }: { logoUrl: string }) {
       if (error) setError('Email o contraseña incorrectos.');
       return;
     }
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin, shouldCreateUser: false } });
     if (error) setError(error.message); else setMessage('Te hemos enviado un enlace de acceso al email.');
     }catch{setError('No se pudo conectar. Comprueba la conexión y vuelve a intentarlo.');}
     finally{pending.current=false;setBusy(false);}

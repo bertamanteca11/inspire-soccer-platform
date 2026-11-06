@@ -24,6 +24,7 @@ import { IntelligencePage } from './pages/IntelligencePage';
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(module => ({ default: module.ReportsPage })));
 
 const VeoAnalytics = lazy(() => import('./pages/VeoModule').then(module => ({ default: module.VeoModule })));
+const StaffPage = lazy(() => import('./pages/StaffPage').then(module => ({ default: module.StaffPage })));
 
 const DEV_BYPASS_LOGIN = false;
 const LOGO_URL = '/logo.png';
@@ -35,6 +36,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [roleAttempt, setRoleAttempt] = useState(0);
+  const [canAccessStaff, setCanAccessStaff] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -59,17 +61,29 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    setRoleUserId(''); setRole('viewer'); setAuthError('');
+    let request = 0;
+    setRoleUserId(''); setRole('viewer'); setCanAccessStaff(false); setAuthError('');
     if (!user) return;
-    supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data, error }: any) => {
-      if (cancelled) return;
-      if (error || !['admin', 'coach', 'viewer'].includes(data?.role)) {
-        setAuthError('No se pudieron verificar tus permisos. Reintenta antes de acceder a los datos.');
-        return;
+    async function verifyAccess() {
+      const current = ++request;
+      try {
+        const { data, error } = await supabase.rpc('app_access');
+        if (cancelled || current !== request) return;
+        if (error || data?.allowed !== true || !['admin','coach'].includes(data?.role) || typeof data?.private_staff !== 'boolean') {
+          setRoleUserId(''); setRole('viewer'); setCanAccessStaff(false);
+          setAuthError(!error && data?.allowed === false ? 'Esta cuenta no tiene acceso a la plataforma. Contacta con Susan.' : 'No se pudieron verificar tus permisos. Reintenta antes de acceder a los datos.');
+          return;
+        }
+        setRole(data.role); setCanAccessStaff(data.private_staff); setRoleUserId(user.id); setAuthError('');
+      } catch {
+        if (!cancelled && current === request) { setRoleUserId(''); setCanAccessStaff(false); setAuthError('No se pudieron verificar tus permisos.'); }
       }
-      setRole(data.role); setRoleUserId(user.id);
-    }, () => { if (!cancelled) setAuthError('No se pudieron verificar tus permisos.'); });
-    return () => { cancelled = true; };
+    }
+    void verifyAccess();
+    const onVisible = () => { if (document.visibilityState === 'visible') void verifyAccess(); };
+    const interval = window.setInterval(onVisible, 60000);
+    window.addEventListener('focus', onVisible); document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; window.clearInterval(interval); window.removeEventListener('focus', onVisible); document.removeEventListener('visibilitychange', onVisible); };
   }, [user?.id, roleAttempt]);
 
   if (loading) return <Screen><p>Cargando...</p></Screen>;
@@ -86,10 +100,10 @@ export default function App() {
   if (query.get('veo-preview') === '1' || query.get('veo') === '1') {
     return <VeoProvider key={user.id} role={previewRole}><Screen><Suspense fallback={<p>Cargando VEO...</p>}><VeoAnalytics initialSection={query.get('veo-preview') === '1' ? 'import' : query.has('player') ? 'players' : 'dashboard'}/></Suspense></Screen></VeoProvider>;
   }
-  return <VeoProvider key={user.id} role={previewRole}><Platform key={user.id} role={previewRole} previewRole={previewRole}/></VeoProvider>;
+  return <VeoProvider key={user.id} role={previewRole}><Platform key={`${user.id}:${previewRole}:${canAccessStaff}`} role={previewRole} previewRole={previewRole} canAccessStaff={canAccessStaff}/></VeoProvider>;
 }
 
-function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: Role }) {
+function Platform({ role, previewRole = 'viewer', canAccessStaff = false }: { role: Role; previewRole?: Role; canAccessStaff?: boolean }) {
   const [tab, setTab] = useState<Tab>(role === 'coach' ? 'attendance' : 'home');
   const [nextSession, setNextSession] = useState<AppSession | null>(null);
   const [selectedSession, setSelectedSession] = useState<AppSession | null>(null);
@@ -187,7 +201,8 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
   }
 
   return (
-    <ApplicationShell role={role} tab={tab} setTab={setTab} title={headerTitle} selectedSessionLabel={selectedSession && ['home', 'sessions', 'callup', 'attendance', 'evaluation'].includes(tab) ? selectedSession.name : undefined} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
+    <ApplicationShell role={role} canAccessStaff={canAccessStaff} tab={tab} setTab={setTab} title={headerTitle} selectedSessionLabel={selectedSession && ['home', 'sessions', 'callup', 'attendance', 'evaluation'].includes(tab) ? selectedSession.name : undefined} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
+          {tab === 'staff' && canAccessStaff && <Suspense fallback={<Card><p role="status">Cargando staff…</p></Card>}><StaffPage canAccess={canAccessStaff} initialSessionId={selectedSession?.id}/></Suspense>}
           {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
           {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
           {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage role={role} reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} onArchiveChange={onArchiveChange} onViewHistory={id => { setSummarySessionId(id); setTab('summary'); }} />}
@@ -228,6 +243,7 @@ function getHeaderTitle(tab: Tab) {
     intelligence: 'Seguimiento semanal',
     reports: 'Informes',
     veo: 'VEO Analytics',
+    staff: 'Staff',
   };
 
   return map[tab];

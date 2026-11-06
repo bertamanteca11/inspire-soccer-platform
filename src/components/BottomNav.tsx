@@ -7,11 +7,11 @@ import { ClubCrest } from './shell/ClubCrest';
 import { navigationGroups, primaryTabs, SIDEBAR_MEDIA, visibleDestinations } from './shell/navigation';
 import '../styles/application-shell.css';
 
-export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab: (tab: Tab) => void }) {
+export function BottomNav({ role, tab, setTab, canAccessStaff = false }: { role: Role; tab: Tab; setTab: (tab: Tab) => void; canAccessStaff?: boolean }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const items = visibleDestinations(role);
+  const items = visibleDestinations(role, canAccessStaff);
   const secondary = items.filter(item => !primaryTabs.includes(item.tab));
   const close = () => { dialog.current?.close(); setMoreOpen(false); };
   const go = (next: Tab) => {

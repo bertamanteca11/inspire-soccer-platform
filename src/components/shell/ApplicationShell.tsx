@@ -9,13 +9,14 @@ import { ShellTitleContext } from './ShellTitleContext';
 import { SessionWorkflow } from './SessionWorkflow';
 import '../../styles/application-shell.css';
 
-export function ApplicationShell({ role, tab, setTab, title, selectedSessionLabel, children, onLogout, error }: {
+export function ApplicationShell({ role, tab, setTab, title, selectedSessionLabel, children, onLogout, error, canAccessStaff = false }: {
   role: Role; tab: Tab; setTab: (tab: Tab) => void; title: string;
   selectedSessionLabel?: string; children: ReactNode; onLogout: () => void; error?: string;
+  canAccessStaff?: boolean;
 }) {
   return <div className="club-shell">
     <a className="club-skip" href="#club-main">Saltar al contenido</a>
-    <BottomNav role={role} tab={tab} setTab={setTab}/>
+    <BottomNav role={role} tab={tab} setTab={setTab} canAccessStaff={canAccessStaff}/>
     <div className="app club-content">
       <PremiumScope className="club-header-scope"><header className="club-header">
         <div className="club-page-identity"><ClubCrest/><h1>{title}</h1></div>
