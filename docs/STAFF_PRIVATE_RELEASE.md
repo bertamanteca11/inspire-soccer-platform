@@ -17,6 +17,11 @@ no hacen falta correos ni contraseñas. Si hay varios, la instalación se detien
 hasta indicar el UUID de la cuenta que utiliza Juli. Los roles actuales se
 conservan. No se crean ni eliminan cuentas.
 
+Si se prepara un instalador para un proyecto concreto, se guarda como
+`supabase/staff/INSTALL_PRIVATE_STAFF.local.sql`. Esa copia lleva el UUID Coach
+comprobado, está excluida de Git y sustituye al instalador genérico en el paso 1.
+El instalador genérico y las pruebas no incluyen identificadores reales.
+
 La privacidad del staff se verifica en Supabase: hace falta estar en la lista
 autorizada y tener un perfil Admin. Coach no puede cambiar su rol ni editar la
 lista de acceso desde la app. Un perfil nuevo no obtiene acceso automáticamente

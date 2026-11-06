@@ -22,7 +22,10 @@ test('private staff and membership restrictions against the exported schema and 
     return (await db.query('SELECT private_staff_action($1,$2,$3::jsonb,$4) AS data',[session,name,JSON.stringify(payload),version])).rows[0].data;
   };
   const isolated=async body=>{await privileged();await db.exec('BEGIN');isolate=true;try{await body();}finally{isolate=false;await db.exec('ROLLBACK');}};
-  const configured=()=>read('supabase/staff/INSTALL_PRIVATE_STAFF.sql');
+  const configured=(coach=null)=>read('supabase/staff/INSTALL_PRIVATE_STAFF.sql').replace(
+    'INSERT INTO staff_access_setup VALUES (NULL);',
+    `INSERT INTO staff_access_setup VALUES (${coach ? "'"+coach+"'::uuid" : 'NULL'});`
+  );
   try{
     await db.exec(read('tests/fixtures/live-schema-2026-11-06.sql'));
     await db.exec('ALTER TABLE auth.users ADD email text,ADD email_confirmed_at timestamptz;');
@@ -40,9 +43,15 @@ test('private staff and membership restrictions against the exported schema and 
       await assert.rejects(db.exec(configured()),/una \u00fanica cuenta Coach/);
       await db.exec('ROLLBACK');
       assert.equal((await db.query("SELECT to_regclass('public.app_access_members') AS table_name")).rows[0].table_name,null);
-      await db.query("UPDATE profiles SET role='viewer' WHERE id=$1",[outsider]);
     });
-    await db.exec(configured());
+    await db.exec(configured(juli));
+    await t.test('explicit shared Coach selection approves that account and excludes the other Coach',async()=>{
+      await auth(juli);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,true);
+      await auth(outsider);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,false);
+      await privileged();
+      const approved=(await db.query("SELECT m.user_id FROM app_access_members m JOIN profiles p ON p.id=m.user_id WHERE p.role::text='coach'")).rows;
+      assert.deepEqual(approved,[{user_id:juli}]);
+    });
     await t.test('post-install diagnostic verifies every new privacy and installation check',async()=>{
       const result=(await db.query(read('diagnostics/private_staff_post_install_check.sql'))).rows[0].private_staff_check;
       assert.equal(result.all_ok,true,JSON.stringify(result));
