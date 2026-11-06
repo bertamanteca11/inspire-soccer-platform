@@ -92,6 +92,15 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Legacy RPC is not called by the current frontend. Keep its body and internal
+-- callers intact, but close direct API execution instead of allowing an
+-- unreviewed SECURITY DEFINER routine around the membership checks.
+DO $$ BEGIN
+  IF to_regprocedure('public.advance_suspensions_for_match(uuid)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.advance_suspensions_for_match(uuid) FROM PUBLIC,anon,authenticated;
+  END IF;
+END $$;
+
 -- Fail the complete installation if an unknown definer RPC or owner-bypassing
 -- view would provide an unreviewed alternative to the membership checks.
 DO $$ DECLARE unexpected text; BEGIN

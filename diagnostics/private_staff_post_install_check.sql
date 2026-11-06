@@ -4,6 +4,10 @@ WITH private_tables(name) AS (VALUES
   ('private_staff_control'),('private_staff_members'),('private_staff_workflows'),
   ('private_staff_callups'),('private_staff_attendance'),('private_staff_cards'),('private_staff_suspensions')
 ), checks(name,ok) AS (
+  SELECT 'legacy_suspension_rpc_not_exposed',CASE WHEN to_regprocedure('public.advance_suspensions_for_match(uuid)') IS NULL THEN true ELSE
+    NOT has_function_privilege('authenticated',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE')
+    AND NOT has_function_privilege('anon',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE') END
+  UNION ALL
   SELECT 'one_approved_coach',count(*) FILTER(WHERE p.role::text='coach')=1
     AND count(*) FILTER(WHERE p.role::text='admin')>=1 AND bool_and(p.role::text IN ('admin','coach'))
   FROM public.app_access_members m JOIN public.profiles p ON p.id=m.user_id

@@ -38,13 +38,40 @@ test('private staff and membership restrictions against the exported schema and 
     await db.exec(read('supabase/batch4/REVIEW_INSTALL.sql'));
     await db.exec(read('supabase/veo/001_veo_analytics.sql'));
     await db.exec(read('supabase/veo/002_veo_read_model.sql'));
+    // Synthetic legacy body: installation must neither execute nor replace it.
+    // The production body is unknown; closing direct API access needs neither.
+    await db.exec(`CREATE FUNCTION public.advance_suspensions_for_match(p_match uuid) RETURNS integer
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN
+        UPDATE public.sessions SET notes='Legacy function executed' WHERE id=p_match;
+        RETURN 1;
+      END $$;
+      GRANT EXECUTE ON FUNCTION public.advance_suspensions_for_match(uuid) TO anon,authenticated,service_role;`);
+    const legacyBody=(await db.query("SELECT pg_get_functiondef('public.advance_suspensions_for_match(uuid)'::regprocedure) AS definition")).rows[0].definition;
     await t.test('ambiguous shared Coach setup aborts atomically instead of granting every coach access',async()=>{
       await db.query("UPDATE profiles SET role='coach' WHERE id=$1",[outsider]);
       await assert.rejects(db.exec(configured()),/una \u00fanica cuenta Coach/);
       await db.exec('ROLLBACK');
       assert.equal((await db.query("SELECT to_regclass('public.app_access_members') AS table_name")).rows[0].table_name,null);
     });
+    await t.test('other unknown definer RPCs still abort and roll back the entire installer',async()=>{
+      await db.exec('CREATE FUNCTION public.validation_only_unreviewed_rpc() RETURNS boolean LANGUAGE sql SECURITY DEFINER AS $$ SELECT true $$;');
+      await assert.rejects(db.exec(configured(juli)),/Revisar RPC adicionales.*validation_only_unreviewed_rpc/);
+      await db.exec('ROLLBACK');
+      assert.equal((await db.query("SELECT to_regclass('public.app_access_members') AS name")).rows[0].name,null);
+      assert.equal((await db.query("SELECT has_function_privilege('anon','public.advance_suspensions_for_match(uuid)','EXECUTE') AS allowed")).rows[0].allowed,true);
+      await db.exec('DROP FUNCTION public.validation_only_unreviewed_rpc();');
+    });
     await db.exec(configured(juli));
+    await t.test('legacy suspension RPC keeps its body and internal permissions but loses direct client access',async()=>{
+      await privileged();
+      assert.equal((await db.query("SELECT pg_get_functiondef('public.advance_suspensions_for_match(uuid)'::regprocedure) AS definition")).rows[0].definition,legacyBody);
+      assert.equal((await db.query('SELECT notes FROM sessions WHERE id=$1',[sid])).rows[0].notes,null);
+      assert.equal((await db.query("SELECT has_function_privilege('service_role','public.advance_suspensions_for_match(uuid)','EXECUTE') AS allowed")).rows[0].allowed,true);
+      for(const person of [null,susan,juli,outsider]){
+        await auth(person);await assert.rejects(db.query('SELECT advance_suspensions_for_match($1)',[sid]),/permission denied/);
+      }
+      await privileged();
+    });
     await t.test('explicit shared Coach selection approves that account and excludes the other Coach',async()=>{
       await auth(juli);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,true);
       await auth(outsider);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,false);

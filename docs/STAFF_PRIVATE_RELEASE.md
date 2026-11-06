@@ -32,6 +32,12 @@ Auth válida. La restricción se aplica a las tablas existentes y a los RPC de
 Batch 4 y VEO, además de a la entrada de la aplicación. Una función privilegiada
 o vista adicional no revisada detiene la instalación entera.
 
+La RPC heredada `advance_suspensions_for_match(uuid)`, detectada en producción,
+no se utiliza desde el frontend actual. La instalación conserva su definición
+y sus permisos internos, y retira la ejecución directa de PUBLIC, anon y
+authenticated. No la ejecuta ni recalcula sanciones históricas. Las sanciones
+de la aplicación se gestionan mediante los RPC revisados de Batch 4.
+
 ## Orden de publicación
 
 1. Abrir `supabase/staff/INSTALL_PRIVATE_STAFF.sql` y ejecutarlo completo en
