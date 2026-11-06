@@ -2,6 +2,10 @@
 
 Fecha: 6 de noviembre de 2026. El usuario pide publicar si está listo.
 Resultado: publicación bloqueada por incompatibilidad de la base configurada.
+Actualización de procedimiento: el usuario ejecutará los pasos de Supabase desde
+SQL Editor y rechaza conectar Codex. No pedir de nuevo esa conexión. Seguir
+`PUBLICACION_MANUAL_SUPABASE.md`; el asistente se encarga de Git y la comprobación
+externa de publicación cuando se complete la actualización manual.
 No se ha ejecutado ninguna migración remota ni publicado la interfaz nueva en
 producción. El usuario autoriza ahora guardar y subir los cambios de código en
 la rama `feature/premium-ui-redesign`. Esa entrega no actualiza `main` ni Supabase;
@@ -51,9 +55,9 @@ pública de Supabase queda incluida en el JavaScript, como corresponde a Vite.
 
 ## Pasos que faltan
 
-1. Completar las conexiones administrativas sugeridas. Dominio, repositorio y
-   rama `main` ya están identificados; verificar también la configuración del
-   proyecto y sus variables desde Vercel antes de la publicación.
+1. Completar el procedimiento manual de Supabase con el usuario; no requiere
+   instalar plugins. Dominio, repositorio y rama `main` ya están identificados.
+   Git autenticado funciona y la rama de trabajo ya está subida a GitHub.
 2. Obtener una copia recuperable del esquema y datos y probar su restauración en
    un entorno aislado. El diagnóstico recibido no es una copia de seguridad.
 3. Validar allí el paquete con Auth/PostgREST y cuentas Admin/Coach/consulta;

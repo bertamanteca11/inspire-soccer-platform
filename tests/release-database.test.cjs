@@ -257,3 +257,22 @@ test('review bundle installs atomically and a failed preflight rolls every sourc
     assert((await db.query("SELECT to_regprocedure('public.batch4_workflow_access(uuid,text)') AS access")).rows[0].access);
   }finally{await db.close();}
 });
+
+test('manual compatibility rehearsal rolls back; installation check detects missing, installed and weakened metadata',async()=>{
+  const db=await createReleaseDatabase();
+  const check=async()=>{await db.exec("NOTIFY pgrst, 'reload schema'");return (await db.query(sql('diagnostics/release_post_install_check.sql').replace(/^NOTIFY[^;]+;/m,''))).rows[0].release_check;};
+  try{
+    await db.exec(sql('tests/fixtures/live-schema-2026-11-06.sql'));
+    assert.equal((await check()).all_ok,false);
+    await db.exec(sql('supabase/batch4/CHECK_INSTALL_ROLLBACK.sql'));
+    assert.equal((await db.query("SELECT to_regprocedure('public.batch4_workflow_access(uuid,text)') AS rpc")).rows[0].rpc,null);
+    assert.equal((await check()).checks.marker_column,false);
+    await db.exec(sql('supabase/batch4/REVIEW_INSTALL.sql'));
+    const installed=await check();assert.equal(installed.all_ok,true,JSON.stringify(installed));
+    await db.exec('ALTER TABLE public.attendance DISABLE TRIGGER batch4_attendance_guard');
+    assert.equal((await check()).checks['guard:batch4_attendance_guard'],false);
+    await db.exec('ALTER TABLE public.attendance ENABLE TRIGGER batch4_attendance_guard');
+    await db.exec('GRANT UPDATE ON public.active_suspensions TO authenticated');
+    assert.equal((await check()).checks['view:active_suspensions'],false);
+  }finally{await db.close();}
+});
