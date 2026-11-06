@@ -1,19 +1,22 @@
-# Plan de publicación — BLOQUEADO POR COMPATIBILIDAD DEL BACKEND
+# Plan de publicación — BACKEND INSTALADO, PUBLICACIÓN EN CURSO
 
 Actualizado: 6 de noviembre de 2026. Esta entrega es local. Los adaptadores y
 operaciones atómicas ya están preparados. Consultar primero
 `RELEASE_REVIEW_2026_11_06.md`: detalla el paquete transaccional REVIEW_INSTALL.sql,
 disciplina, cuatro cualidades y cierre de permisos de vistas.
-El usuario solicita publicar si está listo. Esa autorización condicional queda
-registrada; no se vuelve a pedir autorización general para publicar. La condición
-aún no se cumple: faltan la instalación/validación del backend compatible, el backup
-verificado y el acceso al destino de publicación.
+El usuario ha instalado manualmente el backend y aportado `all_ok: true` en la
+comprobación de firmas, grants, guards, vistas y RLS. La API externa confirma la
+columna requerida con HTTP 200. Con la autorización de publicación ya recibida,
+se publica ahora el frontend compatible mediante `main` y Vercel. El backup no
+ha sido confirmado expresamente y los recorridos autenticados Admin/Coach aún
+necesitan una comprobación real; no se presentan como verificados.
 
-Comprobación de solo lectura del 6 de noviembre: el Supabase configurado devuelve
+Comprobación anterior a la instalación manual, del 6 de noviembre: el Supabase configurado devolvía
 `42703` al consultar la columna `sessions.draft_defaults_version` (no existe) y
 `PGRST202` para el RPC de acceso consultado por GET anónimo. Esa consulta no certifica
 los permisos de usuarios autenticados, pero la columna ausente ya confirma que
-el esquema es incompatible con esta versión. Ver `PRODUCTION_READINESS_2026_11_06.md`.
+el esquema todavía era incompatible con esta versión. Ese bloqueo concreto queda
+resuelto por la instalación manual. Ver `PRODUCTION_READINESS_2026_11_06.md`.
 
 ## Condiciones previas y aprobaciones manuales
 

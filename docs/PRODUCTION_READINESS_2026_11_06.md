@@ -1,7 +1,18 @@
 # Comprobación para publicar
 
 Fecha: 6 de noviembre de 2026. El usuario pide publicar si está listo.
-Resultado: publicación bloqueada por incompatibilidad de la base configurada.
+Estado actualizado: backend instalado manualmente; comprobación de instalación
+aportada por el usuario con `all_ok: true`. La consulta externa de la columna
+`draft_defaults_version` devuelve ahora HTTP 200. Se inicia la publicación del
+frontend compatible en `main` con la autorización ya recibida.
+
+La comprobación incluye firmas/grants de los siete RPC, ausencia de la sobrecarga
+antigua, nueve guards habilitados, RLS de disciplina y las tres vistas con
+security_invoker y acceso autenticado de solo lectura. No certifica un recorrido
+de usuario autenticado. El usuario no ha confirmado expresamente la copia de
+seguridad; ese dato permanece sin verificar y no se presenta como completado.
+La instalación ya realizada hace prioritario publicar el frontend compatible,
+pues la versión antigua no puede usar los nuevos flujos de escritura.
 Actualización de procedimiento: el usuario ejecutará los pasos de Supabase desde
 SQL Editor y rechaza conectar Codex. No pedir de nuevo esa conexión. Seguir
 `PUBLICACION_MANUAL_SUPABASE.md`; el asistente se encarga de Git y la comprobación
@@ -11,7 +22,7 @@ producción. El usuario autoriza ahora guardar y subir los cambios de código en
 la rama `feature/premium-ui-redesign`. Esa entrega no actualiza `main` ni Supabase;
 el bloqueo de compatibilidad para producción permanece vigente.
 
-## Evidencia actual
+## Evidencia anterior a la instalación manual
 
 Se han realizado dos GET a la API del proyecto indicado en el `.env` local,
 usando exclusivamente su configuración pública, sin extraer filas ni credenciales:
@@ -26,7 +37,7 @@ autenticado. La ausencia de la columna sí demuestra que el esquema aún no es
 compatible con el frontend preparado: crear sesiones nuevas con el marcador falla.
 Por tanto, las pruebas locales correctas no permiten publicar este frontend solo.
 
-El remoto de GitHub sigue en `main`, commit
+Antes de esta publicación, el remoto de GitHub estaba en `main`, commit
 `8af9ded197e0421403043e4e697a9cde57a8f843`. La configuración del repositorio menciona
 Vercel. El usuario ha confirmado el proyecto `bertamanteca11s-projects/inspire-soccer-platform`,
 dominio `https://inspire-soccer-platform.vercel.app/`, rama `main` y despliegue del
