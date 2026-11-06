@@ -15,7 +15,8 @@ export async function readSummaryPages<T>(read: (from: number, to: number) => Pr
   for (let offset = 0; ; ) {
     const result = await read(offset, offset + 499);
     if (result.error) throw new Error(result.error.message);
-    if (!result.data?.length) return rows;
+    if (!Array.isArray(result.data)) throw new Error('Lectura incompleta del resumen. Recarga antes de consultar los totales.');
+    if (!result.data.length) return rows;
     rows.push(...result.data); offset += result.data.length;
   }
 }

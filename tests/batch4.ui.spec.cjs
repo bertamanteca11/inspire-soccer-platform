@@ -12,6 +12,7 @@ async function setup(page,{mode='attendance',coach=false,historical=false}={}) {
       return route.continue();
     }
     const table=url.pathname.split('/').pop();
+    if(table==='batch4_discipline_balances')return route.fulfill({json:[]});
     if(table==='batch4_workflow_access')return route.fulfill({json:!(coach&&mode==='callup')&&!session[`${mode==='callup'?'callup':'attendance'}_confirmed`]});
     if(table==='batch4_workflow_action') {
       const body=req.postDataJSON();writes.push({table,body});
@@ -25,7 +26,7 @@ async function setup(page,{mode='attendance',coach=false,historical=false}={}) {
       if(table!=='attendance')throw new Error('Unexpected mutation '+table);
       attendance=body.map((r,i)=>({...r,id:String(i)}));return route.fulfill({json:null});
     }
-    const tables={players,callups:calls,attendance,sessions:mode==='sessions'?[session]:session,active_suspensions:[]};
+    const tables={players,callups:calls,attendance,evaluations:[],sessions:mode==='sessions'?[session]:session,active_suspensions:[],suspensions:[]};
     if(!Object.hasOwn(tables,table))throw new Error('Unexpected read '+table);
     const data=tables[table];
     return route.fulfill({json:Array.isArray(data)?data.slice(Number(url.searchParams.get('offset')||0),Number(url.searchParams.get('offset')||0)+Number(url.searchParams.get('limit')||500)):data});
@@ -41,21 +42,21 @@ test('attendance defaults are local, complete save persists untouched guests, re
   await expect(present.nth(2)).toHaveAttribute('aria-pressed','false');
   await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Guarda');expect(state.writes).toEqual([]);
-  await page.getByRole('button',{name:'Ausencia',exact:true}).nth(0).click();
+  await page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0).click();
   expect(state.writes).toEqual([]);
   await page.getByRole('button',{name:'Toggle page'}).click();await page.getByRole('button',{name:'Toggle page'}).click();
   await expect(present.nth(0)).toHaveAttribute('aria-pressed','true');expect(state.writes).toEqual([]);
-  await page.getByRole('button',{name:'Ausencia',exact:true}).nth(0).click();
+  await page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0).click();
   await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('guardada');
   expect(state.attendance.map(r=>[r.player_id,r.status])).toEqual([['p','unjustified_absence'],['g','present']]);
   await page.getByRole('button',{name:'Toggle page'}).click();await page.getByRole('button',{name:'Toggle page'}).click();
-  await expect(page.getByRole('button',{name:'Ausencia',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
   await expect(page.getByRole('button',{name:'Asistencia cerrada',exact:true})).toBeVisible();
   expect(state.writes.filter(w=>w.table==='attendance')).toHaveLength(1);
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Reabrir asistencia',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Ausencia',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
 });
 test('callup changes wait for confirmation and saved exclusions survive reopen',async({page})=>{
   const state=await setup(page,{mode:'callup'});

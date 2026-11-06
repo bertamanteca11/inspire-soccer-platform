@@ -1,5 +1,7 @@
 // N/A applies to individual qualities, not the whole player.
-export const SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability'] as const;
+export const SCORE_FIELDS = ['tactical_discipline','effort_commitment','decision_making','mentality_attitude'] as const;
+// The retired quality remains stored and available in historical originals.
+export const STORED_SCORE_FIELDS = [...SCORE_FIELDS, 'coachability'] as const;
 export function isFieldNA(e: any, field: string): boolean { return Boolean(e?.not_applicable || e?.na_fields?.[field] === true); }
 export function fieldScore(e: any, field: string): number | null {
   if (!e || isFieldNA(e,field) || e[field] == null) return null;

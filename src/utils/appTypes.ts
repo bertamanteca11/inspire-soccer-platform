@@ -3,6 +3,9 @@ import type { Session } from '../types';
 export type Tab = 'home'|'players'|'sessions'|'callup'|'attendance'|'evaluation'|'injuries'|'summary'|'standouts'|'history'|'intelligence'|'reports'|'veo';
 
 export type AppSession = Session & {
+  locked_at?: string | null;
+  records_only_confirmed?: boolean | null;
+  is_test?: boolean | null;
   draft_defaults_version?: number | null;
   start_time?: string | null;
   callup_confirmed?: boolean;
@@ -30,7 +33,6 @@ export const ratingFields = [
   ['effort_commitment', 'Esfuerzo / compromiso'],
   ['decision_making', 'Toma de decisiones'],
   ['mentality_attitude', 'Mentalidad / actitud'],
-  ['coachability', 'Capacidad de corrección'],
 ] as const;
 
 export const attendanceOptions = [

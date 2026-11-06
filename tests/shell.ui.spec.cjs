@@ -112,7 +112,7 @@ test('login shows the unchanged crest and keeps both authentication modes', asyn
   const logo = page.getByRole('img', { name:'Escudo oficial de Inspire Soccer' });
   await expect(logo).toHaveAttribute('src','/logo.png'); await expect(logo).toHaveCSS('object-fit','contain');
   expect(await logo.evaluate(async node => { await node.decode(); return node.naturalWidth>0; })).toBe(true);
-  await page.getByRole('button',{name:'Email link',exact:true}).click();
+  await page.getByRole('button',{name:'Enlace por correo',exact:true}).click();
   await expect(page.getByRole('button',{name:'Enviar enlace',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Contraseña',exact:true}).click();
   await expect(page.getByRole('button',{name:'Entrar',exact:true})).toBeVisible();

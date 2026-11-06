@@ -3,9 +3,14 @@ const fs=require('node:fs');const ts=require('typescript');
 require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,file);
 const fixture=require('./phase4.fixture.ts');
 
-async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok'}={}){
+async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok',extraSeasons=false}={}){
+  await page.clock.setFixedTime(new Date('2026-11-06T12:00:00Z'));
   const writes=[],unexpected=[],errors=[];let rows=structuredClone(fixture.attendance);
   let sessionRows=structuredClone(fixture.sessions).map(s=>({...s,high_rating_limit:4,low_rating_limit:2,responsible:'Fixture coach',home_away:'home',start_time:'19:00'}));
+  if(extraSeasons){
+    const extra=['2026-06-30','2026-07-01','2027-07-01'].map((date,i)=>({id:'season-boundary-'+i,name:'Season boundary '+i,session_date:date,type:'training',status:'completed'}));
+    sessionRows.push(...extra);rows.push(...extra.map(s=>({id:'attendance-'+s.id,session_id:s.id,player_id:fixture.marcos,status:'unjustified_absence'})));
+  }
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/*',async route=>{
     const request=route.request();const url=new URL(request.url());
@@ -15,6 +20,11 @@ async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok'}=
     }
     const table=url.pathname.split('/').pop();
     if(table==='batch4_workflow_access')return route.fulfill({json:true});
+    if(table==='batch4_workflow_action'){
+      const body=request.postDataJSON();writes.push({table,body});
+      sessionRows=sessionRows.map(s=>s.id===body.p_session?{...s,[body.p_workflow+'_confirmed']:body.p_action==='confirm'}:s);
+      return route.fulfill({json:{id:body.p_session,[body.p_workflow+'_confirmed']:body.p_action==='confirm'}});
+    }
     if(!url.pathname.includes('/rest/v1/')){unexpected.push(request.method()+' '+url.pathname);return route.abort();}
     if(request.method()!=='GET'){
       writes.push({table,body:request.postDataJSON()});
@@ -45,10 +55,21 @@ async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok'}=
 }
 const absenceCount=page=>page.locator('.card').filter({has:page.getByText('Asistencia del ámbito',{exact:true})}).locator('section.profile-section p').filter({hasText:'Ausencias injustificadas (incluye lesión):'});
 
+test('Susan review shortcut selects exactly 18/21/23 while preserving the actual Marcos discrepancy',async({page})=>{
+  const state=await setup(page);await page.goto('/phase4-test');
+  await page.getByLabel('Jugador del resumen').selectOption(fixture.marcos);
+  await page.getByRole('button',{name:'Revisión de Susan: 18, 21 y 23 de octubre',exact:true}).click();
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(3);
+  await expect(page.getByText('3 sesiones · 2 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
+  await expect(absenceCount(page)).toHaveText(/: 0$/);
+  await expect(page.getByText('Sin registro — no suma presencia ni ausencia',{exact:true})).toBeVisible();
+  expect(state.writes).toEqual([]);
+});
+
 test('selected-period totals show verified Marcos records and retain a separate complete history',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test');
   await expect(page.getByRole('heading',{name:'Sesiones y registros incluidos'})).toBeVisible();
-  await expect(absenceCount(page)).toHaveText(/: 0$/);
+  await expect(absenceCount(page)).toHaveText(/: 2$/);
   await page.getByLabel('Jugador del resumen').selectOption(fixture.marcos);
   await page.getByLabel('Desde',{exact:true}).fill('2026-10-18');
   await page.getByLabel('Hasta',{exact:true}).fill('2026-10-23');
@@ -60,6 +81,44 @@ test('selected-period totals show verified Marcos records and retain a separate 
   await page.getByRole('button',{name:'Historial completo',exact:true}).click();
   await expect(absenceCount(page)).toHaveText(/: 4$/);
   await expect(page.getByText('No es el total operativo oficial.',{exact:false})).toBeVisible();
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('Summary opens the last 28 days, offers season totals, and resets a custom filter when reopened',async({page})=>{
+  const state=await setup(page);await page.goto('/phase4-test');
+  await expect(page.getByLabel('Periodo del resumen')).toHaveValue('four-weeks');
+  await expect(page.getByLabel('Desde',{exact:true})).toHaveValue('2026-10-10');
+  await expect(page.getByLabel('Hasta',{exact:true})).toHaveValue('2026-11-06');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(5);
+  await expect(page.getByText('5 sesiones · 4 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
+  await expect(absenceCount(page)).toHaveText(/: 2$/);
+  await page.getByLabel('Periodo del resumen').selectOption('season');
+  await expect(page.getByLabel('Desde',{exact:true})).toHaveValue('2026-07-01');
+  await expect(page.getByLabel('Hasta',{exact:true})).toHaveValue('2027-06-30');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(7);
+  await expect(absenceCount(page)).toHaveText(/: 4$/);
+  await page.getByRole('checkbox',{name:new RegExp(fixture.intendedIds[2])}).uncheck();
+  await expect(page.getByLabel('Periodo del resumen')).toHaveValue('custom');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(6);
+  await page.getByRole('button',{name:'Actualizar datos del resumen',exact:true}).click();
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(6);
+  await page.reload();await expect(page.getByLabel('Periodo del resumen')).toHaveValue('four-weeks');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(5);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('whole season excludes adjacent seasons and allows selecting an earlier July-June season',async({page})=>{
+  const state=await setup(page,{extraSeasons:true});await page.goto('/phase4-test');
+  await page.getByLabel('Periodo del resumen').selectOption('season');
+  await expect(page.getByLabel('Temporada del resumen')).toHaveValue('2026');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(8);
+  await expect(absenceCount(page)).toHaveText(/: 5$/);
+  await page.getByLabel('Temporada del resumen').selectOption('2025');
+  await expect(page.getByLabel('Desde',{exact:true})).toHaveValue('2025-07-01');
+  await expect(page.getByLabel('Hasta',{exact:true})).toHaveValue('2026-06-30');
+  await expect(page.getByRole('checkbox',{checked:true})).toHaveCount(1);
+  await expect(page.getByText('1 sesiones · 1 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
+  await expect(absenceCount(page)).toHaveText(/: 1$/);
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('planned, archived and marked-test sessions cannot enter the operational selection',async({page})=>{
@@ -103,6 +162,31 @@ test('editing an existing justified absence preserves its status and transfer no
   await expect(page.getByRole('status')).toContainText('guardada correctamente');
   expect(state.writes[0].body[0]).toMatchObject({status:'justified_absence',notes:'Transferencia desde Guineueta'});
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('Admin opens the saved attendance from Summary, reopens it and changes the classification without losing its note',async({page})=>{
+  const state=await setup(page);await page.goto('/phase4-test');
+  const name=fixture.sessions.find(s=>s.id===fixture.intendedIds[1]).name;
+  await page.getByRole('button',{name:'Revisar asistencia de '+name,exact:true}).click();
+  await expect(page.getByRole('button',{name:'Ausencia justificada',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true})).toBeDisabled();
+  expect(state.writes).toEqual([]);
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Reabrir asistencia',exact:true}).click();
+  await page.getByRole('button',{name:'Ausencia injustificada',exact:true}).click();
+  await expect(page.getByPlaceholder('Explicación recomendada...')).toHaveValue('Transferencia desde Guineueta');
+  await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('guardada correctamente');
+  expect(state.attendance.find(a=>a.session_id===fixture.intendedIds[1])).toMatchObject({status:'unjustified_absence',notes:'Transferencia desde Guineueta'});
+  expect(state.attendance.filter(a=>a.session_id!==fixture.intendedIds[1])).toEqual(fixture.attendance.filter(a=>a.session_id!==fixture.intendedIds[1]));
+  expect(state.writes[0]).toMatchObject({table:'batch4_workflow_action',body:{p_session:fixture.intendedIds[1],p_workflow:'attendance',p_action:'reopen'}});
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('Coach Summary does not expose Admin attendance correction actions',async({page})=>{
+  const state=await setup(page);await page.goto('/phase4-test?role=coach');
+  await expect(page.getByLabel('Periodo del resumen')).toBeVisible();
+  await expect(page.getByRole('button',{name:/^Revisar asistencia de /})).toHaveCount(0);
+  expect(state.writes).toEqual([]);expect(state.errors).toEqual([]);
 });
 
 test('an unavailable roster blocks attendance writes',async({page})=>{

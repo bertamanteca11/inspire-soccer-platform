@@ -5,7 +5,8 @@ export async function workflowRows<T>(read: (from: number, to: number) => Promis
     for (let offset = 0; ; ) {
       const result = await read(offset, offset + 499);
       if (result.error) return { data: [], error: result.error };
-      if (!result.data?.length) return { data: rows, error: null };
+      if (!Array.isArray(result.data)) return { data: [], error: { message: 'Lectura incompleta. Recarga antes de continuar.' } };
+      if (!result.data.length) return { data: rows, error: null };
       rows.push(...result.data); offset += result.data.length;
     }
   } catch (error) { return { data: [], error: { message: String(error) } }; }

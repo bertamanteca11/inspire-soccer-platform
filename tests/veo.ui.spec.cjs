@@ -25,7 +25,7 @@ async function loginLocally(page, role = 'admin', backend = null) {
     return route.abort();
   });
   await page.goto('/?veo-preview=1');
-  await page.getByPlaceholder('Email', { exact: true }).fill('preview-test@example.invalid');
+  await page.getByLabel('Correo electrónico', { exact: true }).fill('preview-test@example.invalid');
   await page.getByPlaceholder('Contraseña', { exact: true }).fill('local-test-only');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   return { unexpected, browserErrors };
@@ -90,7 +90,7 @@ test('all six local analytics sections work on mobile without persistence', asyn
   const {unexpected,browserErrors}=await loginLocally(page);
   await page.getByLabel('Libro Excel (.xlsx, máximo 10 MB)').setInputFiles(fixture);
   await expect(page.getByRole('status').filter({hasText:'23 observaciones'})).toBeVisible();
-  const sections=[['Dashboard','Balance de resultados'],['Partidos','Partidos importados'],['Jugadores','Analítica individual VEO'],['Rankings y comparación','Rankings deportivos'],['Primas','Primas calculadas · no son pagos'],['Importación','VEO · Previsualización de Excel']];
+  const sections=[['Resumen VEO','Balance de resultados'],['Partidos','Partidos importados'],['Jugadores','Analítica individual VEO'],['Clasificación y comparación','Clasificaciones deportivas'],['Primas','Primas calculadas · no son pagos'],['Importación','VEO · Previsualización de Excel']];
   for(const [name,heading] of sections){
     await page.getByRole('navigation',{name:'Secciones VEO'}).getByRole('button',{name,exact:true}).click();
     await expect(page.getByRole('heading',{name:heading,exact:true})).toBeVisible();
@@ -129,10 +129,10 @@ test('reviewed mappings, explicit publication, published analytics, safe reimpor
   await expect(page.getByRole('combobox',{name:'Origen',exact:true})).toHaveValue('published');
   await expect(page.locator('input[type=file]')).toBeVisible();
   await expect(page.locator('.veo-hash')).toHaveCount(0);
-  await page.getByRole('navigation',{name:'Secciones VEO'}).getByRole('button',{name:'Dashboard',exact:true}).click();
+  await page.getByRole('navigation',{name:'Secciones VEO'}).getByRole('button',{name:'Resumen VEO',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Balance de resultados'})).toBeVisible();
   await expect(page.locator('.veo-kpis').first()).toContainText('1089');
-  for(const [name,heading] of [['Partidos','Partidos importados'],['Jugadores','Analítica individual VEO'],['Rankings y comparación','Rankings deportivos']]){
+  for(const [name,heading] of [['Partidos','Partidos importados'],['Jugadores','Analítica individual VEO'],['Clasificación y comparación','Clasificaciones deportivas']]){
     await page.getByRole('navigation',{name:'Secciones VEO'}).getByRole('button',{name,exact:true}).click();
     await expect(page.getByRole('heading',{name:heading,exact:true})).toBeVisible();
     await expect(page.getByRole('heading',{name:'Sin partidos para esta selección'})).toHaveCount(0);
@@ -176,7 +176,7 @@ test('anonymous direct VEO entry requires authentication before any VEO request'
     requests.push(url.pathname);return route.abort();
   });
   await page.goto('/?veo=1');
-  await expect(page.getByPlaceholder('Email',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Correo electrónico',{exact:true})).toBeVisible();
   await expect(page.locator('input[type=file]')).toHaveCount(0);
   expect(requests).toEqual([]);
 });

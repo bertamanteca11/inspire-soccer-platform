@@ -1,5 +1,6 @@
 import type { AttendanceRecord } from './attendance';
 import { uniqueAttendanceRecords } from './attendance';
+import { addCalendarDays, calendarDate } from './copenhagenDates';
 
 export type SummarySession = {
   id: string; name: string; session_date: string; status: string; type: string;
@@ -7,6 +8,37 @@ export type SummarySession = {
   records_only_confirmed?: boolean | null;
 };
 export type SummaryScope = { mode: 'history' | 'period' | 'session'; from: string; to: string; sessionIds: string[] };
+export type SummaryPeriodPreset = 'four-weeks' | 'season' | 'custom';
+
+// Inclusive calendar dates: today and the preceding 27 days, across DST/months.
+export function lastFourWeeks(through: string): { from: string; to: string } {
+  return { from: addCalendarDays(through, -27), to: through };
+}
+
+// The season boundary is visible in the UI; custom dates remain available.
+export function seasonStartYear(date: string): number {
+  calendarDate(date);
+  return Number(date.slice(0, 4)) - (Number(date.slice(5, 7)) < 7 ? 1 : 0);
+}
+
+export function seasonBounds(startYear: number): { from: string; to: string } {
+  if (!Number.isInteger(startYear) || startYear < 1000 || startYear > 9998) throw new Error('Temporada inválida.');
+  return { from: `${startYear}-07-01`, to: `${startYear + 1}-06-30` };
+}
+
+export function operationalPeriodSessions(sessions: readonly SummarySession[], from: string, to: string): SummarySession[] {
+  return sessionsInScope(sessions, { mode: 'period', from, to, sessionIds: sessions.map(s => s.id) });
+}
+
+// An explicit review shortcut, never a name-based correction or automatic backfill.
+export function latestMatchAndTrainings(sessions: readonly SummarySession[], through: string): SummarySession[] {
+  const actual=sessions.filter(s=>!operationalExclusion(s)&&s.session_date<=through);
+  const match=actual.filter(s=>['league_match','friendly_match'].includes(s.type))
+    .sort((a,b)=>b.session_date.localeCompare(a.session_date)||a.id.localeCompare(b.id))[0];
+  if(!match)return [];
+  return actual.filter(s=>s.id===match.id||s.type==='training'&&s.session_date>=match.session_date)
+    .sort((a,b)=>a.session_date.localeCompare(b.session_date)||a.id.localeCompare(b.id));
+}
 
 // A tryout is real sporting activity, not automatically disposable test data.
 // No name heuristic or production UUID is used to classify records.

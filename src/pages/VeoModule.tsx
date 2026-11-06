@@ -11,7 +11,7 @@ import '../styles/veo-analytics.css';
 
 export const veoNumber = (n: number | null | undefined, digits = 2) => n == null ? 'Pendiente' : new Intl.NumberFormat('es-ES', { maximumFractionDigits: digits }).format(n);
 export const veoMoney = (n: number | null) => n === null ? 'No calculable' : new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n / 100);
-const tabs = [['dashboard', 'Dashboard'], ['matches', 'Partidos'], ['players', 'Jugadores'], ['rankings', 'Rankings y comparación'], ['bonuses', 'Primas'], ['import', 'Importación']] as const;
+const tabs = [['dashboard', 'Resumen VEO'], ['matches', 'Partidos'], ['players', 'Jugadores'], ['rankings', 'Clasificación y comparación'], ['bonuses', 'Primas'], ['import', 'Importación']] as const;
 type Section = typeof tabs[number][0];
 const labels: Record<string, string> = { ...METRIC_LABELS, minutes: 'Minutos efectivos', fcfMinutes: 'Minutos FCF', veoMinutes: 'Minutos VEO', index: 'Índice VEO' };
 
@@ -125,7 +125,7 @@ function Rankings({ analytics: a }: { analytics: SeasonAnalytics }) {
   const [first, setFirst] = useState(a.players[0]?.key || ''), [second, setSecond] = useState(a.players[1]?.key || '');
   const ranked = rankPlayers(a.players, metric, mode);
   const left = a.players.find(p => p.key === first), right = a.players.find(p => p.key === second);
-  return <><Card><h3>Rankings deportivos</h3><div className="veo-source-controls"><label>Métrica del ranking<select value={metric} onChange={e => setMetric(e.target.value as RankingMetric)}>{Object.entries(labels).filter(([key]) => !['attempts', 'possession', 'conversion', 'failedPasses'].includes(key)).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label>Agregación<select value={mode} onChange={e => setMode(e.target.value as 'total' | 'average')}><option value="total">Total / agregado de la métrica</option><option value="average">Media por partido jugado con dato</option></select></label></div>
+  return <><Card><h3>Clasificaciones deportivas</h3><div className="veo-source-controls"><label>Métrica del ranking<select value={metric} onChange={e => setMetric(e.target.value as RankingMetric)}>{Object.entries(labels).filter(([key]) => !['attempts', 'possession', 'conversion', 'failedPasses'].includes(key)).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label>Agregación<select value={mode} onChange={e => setMode(e.target.value as 'total' | 'average')}><option value="total">Total / agregado de la métrica</option><option value="average">Media por partido jugado con dato</option></select></label></div>
     <p>Sin datos no equivale a cero. Velocidad máxima: mejor registro; velocidad media: ponderada por minutos; precisión: pases exitosos / pases con dato de éxito; índice: media de partidos jugados. Las demás medias usan partidos jugados con esa métrica disponible.</p>
     <VeoBars label={labels[metric]} data={ranked.slice(0, 6).map(r => ({ name: r.player.name, value: metric === 'passingRate' ? r.value * 100 : r.value }))}/>
     <div className="veo-table-wrap"><table><thead><tr><th>Puesto</th><th>Jugador</th><th>{labels[metric]}</th><th>Participaciones</th></tr></thead><tbody>{ranked.map((r, i) => <tr key={r.player.key}><td>{i + 1}</td><td>{r.player.name}</td><td>{veoNumber(metric === 'passingRate' ? r.value * 100 : r.value)}{metric === 'passingRate' ? ' %' : ''}</td><td>{r.player.appearances}</td></tr>)}</tbody></table></div>

@@ -1,3 +1,8 @@
+> Documento histórico. Antes de publicar, consultar
+> [el plan final](docs/FINAL_RELEASE_PLAN.md) y
+> [el roadmap actual](docs/FINAL_PROJECT_ROADMAP.md).
+> No ejecutar las migraciones ni publicar siguiendo únicamente estas instrucciones antiguas.
+
 # Inspire Soccer — cambios solicitados por Susan (10/10/2026)
 
 ## Antes de desplegar

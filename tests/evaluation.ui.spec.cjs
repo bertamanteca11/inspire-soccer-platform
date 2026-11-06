@@ -11,6 +11,7 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
       return route.continue();
     }
     const table=url.pathname.split('/').pop();
+    if(table==='batch4_discipline_balances')return route.fulfill({json:[]});
     if(table==='batch4_workflow_access')return route.fulfill({json:true});
     if(table==='batch4_workflow_action'){
       const body=req.postDataJSON();writes.push({table,body});
@@ -33,7 +34,7 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
       unexpected.push('write '+table);return route.abort();
     }
     const visits=duplicateAttendance?[...fixture.sportAttendance,{...fixture.sportAttendance[0],id:'different-attendance-id'}]:fixture.sportAttendance;
-    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:emptyCallups?[]:partialCallups?fixture.sportCallups.slice(0,1):fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:Array.from({length:alertCount},(_,i)=>({id:'suspension-'+i,display_name:'Suspended player '+i,matches_remaining:20-i}))};
+    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:emptyCallups?[]:partialCallups?fixture.sportCallups.slice(0,1):fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],suspensions:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:Array.from({length:alertCount},(_,i)=>({id:'suspension-'+i,display_name:'Suspended player '+i,matches_remaining:20-i}))};
     if(!Object.hasOwn(tables,table)){unexpected.push(table);return route.abort();}
     let rows=[...tables[table]];
     for(const key of ['id','session_id','player_id']){const f=url.searchParams.get(key);if(f?.startsWith('eq.'))rows=rows.filter(r=>r[key]===f.slice(3));}
@@ -42,14 +43,14 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
   });
   return {writes,unexpected,errors,get evaluations(){return evaluations}};
 }
-test('editor only offers eligible participants and visibly exposes all five stored training qualities',async({page})=>{
+test('editor only offers eligible participants and the four approved training qualities',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test?mode=evaluation');
   await expect(page.locator('.rating-player-row')).toHaveCount(1);
   await expect(page.locator('.rating-player-row')).toContainText('Alex eligible');
-  const fifth=page.getByRole('option',{name:/E\. Capacidad de corrección/});await expect(fifth).toHaveCount(1);
-  await page.locator('select').filter({has:fifth}).selectOption('4');
-  await expect(page.getByRole('heading',{name:/E\. Capacidad de corrección/})).toBeVisible();
-  await expect(page.getByRole('button',{name:'3',exact:true})).toHaveClass(/active/);
+  await expect(page.getByLabel('Cualidad que estás evaluando').locator('option')).toHaveCount(4);
+  await expect(page.getByRole('option',{name:/E\. Capacidad de corrección/})).toHaveCount(0);
+  await page.getByLabel('Cualidad que estás evaluando').selectOption('3');
+  await expect(page.getByRole('heading',{name:'D. Nivel competitivo',exact:true})).toBeVisible();
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('missing evaluation is not defaulted or confirmed and explicit scoring excludes database defaults',async({page})=>{
@@ -69,17 +70,35 @@ test('Summary and Reports agree on eligible player average and exclude out-of-sc
   await page.getByLabel('Desde',{exact:true}).fill('2026-10-19');await page.getByLabel('Hasta',{exact:true}).fill('2026-10-25');
   for(const s of fixture.sportSessions.slice(0,2))await page.getByRole('checkbox',{name:new RegExp(s.id)}).check();
   const card=page.locator('.card').filter({has:page.getByText('Mejores jugadores del ámbito',{exact:true})});
-  await expect(card.locator('.top-row')).toHaveCount(1);await expect(card.locator('.top-row')).toContainText('3.8');
+  await expect(card.locator('.top-row')).toHaveCount(1);await expect(card.locator('.top-row')).toContainText('4.00');
   await page.goto('/phase4-test?mode=reports');await page.getByLabel('Desde',{exact:true}).fill('2026-10-19');await page.getByLabel('Hasta',{exact:true}).fill('2026-10-25');
   await page.getByRole('button',{name:'Generar informe',exact:true}).click();
-  await expect(page.getByText('Sesiones: 2 · Evaluaciones: 2 · Media: 3.80',{exact:true})).toBeVisible();
+  await expect(page.getByText('Sesiones: 2 · Evaluaciones: 2 · Media: 4.00',{exact:true})).toBeVisible();
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('March Summary defaults to recent performance and only includes October averages when the season is selected',async({page})=>{
+  await page.clock.setFixedTime(new Date('2027-03-15T12:00:00Z'));
+  const state=await setup(page);await page.goto('/phase4-test');
+  await expect(page.getByLabel('Desde',{exact:true})).toHaveValue('2027-02-16');
+  await expect(page.getByLabel('Hasta',{exact:true})).toHaveValue('2027-03-15');
+  await expect(page.getByText('0 sesiones · 0 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
+  const card=page.locator('.card').filter({has:page.getByText('Mejores jugadores del ámbito',{exact:true})});
+  await expect(card.locator('.top-row')).toHaveCount(0);
+  await page.getByLabel('Periodo del resumen').selectOption('season');
+  await expect(page.getByLabel('Temporada del resumen')).toHaveValue('2026');
+  await expect(card.locator('.top-row')).toHaveCount(1);
+  await expect(card.locator('.top-row')).toContainText('4.33');
+  await expect(page.getByText('3 sesiones · 12 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
+  await page.getByLabel('Periodo del resumen').selectOption('four-weeks');
+  await expect(card.locator('.top-row')).toHaveCount(0);
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('weekly reporting includes Sunday, excludes next Monday and retains its distinct weighted formula',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test?mode=intelligence');
   await page.getByLabel('Lunes de la semana').fill('2026-10-19');
   const row=page.locator('.weekly-person').filter({has:page.getByText('Alex eligible',{exact:true})});
-  await expect(row.locator('.weekly-score')).toContainText('9.6'); // 4.6 + 3 + subjective Top 2, not a mean.
+  await expect(row.locator('.weekly-score')).toContainText('10.0'); // 5 + 3 + subjective Top 2, not a mean.
   await page.getByLabel('Lunes de la semana').fill('2026-10-26');
   await expect(row.locator('.weekly-score')).toContainText('5.0');
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
@@ -108,7 +127,7 @@ test('Home training ranking uses the same eligible evaluation mean as Summary an
   await page.getByRole('button',{name:'Entrenos',exact:true}).click();
   await expect(page.locator('.top-row')).toHaveCount(1);
   await expect(page.locator('.top-row')).toContainText('Alex eligible');
-  await expect(page.locator('.top-row')).toContainText('4.20'); // All three completed training sessions.
+  await expect(page.locator('.top-row')).toContainText('4.33'); // All three completed training sessions.
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 

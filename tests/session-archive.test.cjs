@@ -86,14 +86,22 @@ test('Supabase permission and invalid-enum errors are actionable and cannot be r
 
 test('automatic operational selection never falls back to archived sessions or any unfiltered query',async()=>{
   const reads=[];
-  client.from=()=>{const filters={};return {select(){return this},gte(){return this},in(key,values){filters[key]=values;return this},order(){return this},async limit(){reads.push(filters);return {data:[],error:null}}};};
+  client.from=()=>{const filters={};return {select(){return this},gte(){return this},in(key,values){filters[key]=values;return this},order(){return this},async range(){reads.push(filters);return {data:[],error:null}},async limit(){reads.push(filters);return {data:[],error:null}}};};
   assert.equal(await getNextAvailableSession(),null);assert.equal(reads.length,2);
   for(const r of reads)assert.deepEqual(r.status,['planned','completed']);
-  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},limit:async()=>({data:[{...session,status:'archived'}],error:null})});
+  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},range:async from=>({data:from?[]:[{...session,status:'archived'}],error:null}),limit:async()=>({data:[{...session,status:'archived'}],error:null})});
   assert.equal(await getNextAvailableSession(),null);
   assert.equal(isActiveSession({...session,status:'archived'}),false);
-  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},limit:async()=>({data:null,error:{message:'Read denied'}})});
+  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},range:async()=>({data:null,error:{message:'Read denied'}})});
   await assert.rejects(getNextAvailableSession(),/Read denied/);
+});
+
+test('operational selection finds the first open session beyond the former 20-row limit and rejects partial catalogs',async()=>{
+  const rows=Array.from({length:25},(_,i)=>({...session,id:String(i),callup_confirmed:i!==24,attendance_confirmed:true,evaluation_confirmed:true}));
+  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},range:async from=>({data:rows.slice(from,from+10),error:null})});
+  assert.equal((await getNextAvailableSession()).id,'24');
+  client.from=()=>({select(){return this},gte(){return this},in(){return this},order(){return this},range:async from=>from?{data:null,error:{message:'Later page denied'}}:{data:rows.slice(0,10),error:null}});
+  await assert.rejects(getNextAvailableSession(),/Later page denied/);
 });
 
 test('historical catalog paginates all statuses, including archived sessions',async()=>{

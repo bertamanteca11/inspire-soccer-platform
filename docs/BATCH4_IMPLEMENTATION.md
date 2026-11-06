@@ -1,13 +1,29 @@
 # Batch 4 local implementation preparation
 
+Current revision: see `RELEASE_REVIEW_2026_11_06.md` and
+`RELEASE_VALIDATION_2026_11_06.md`. The live definitions have now been supplied;
+001a implements the adapters, 003 adds atomic discipline/standouts and 004 closes
+view access. Native PostgreSQL concurrency checks now pass. Earlier BLOCKED
+adapter descriptions below record the initial preparation, not the current code.
+Hosted Supabase Auth/PostgREST validation and production approval remain pending.
+
 Status: LOCAL ONLY, NOT RELEASE READY. No Supabase migration has been executed.
+
+Latest local validation and the exact changed-file inventory are in
+`docs/FINAL_TEST_REPORT.md`; the original WIP validation counts below are historical.
 
 ## Release blockers: do not guess these definitions
 
 The supplied audit establishes RLS roles, unique pairs, global-only lock triggers
 on attendance/evaluations/cards, and an evaluation high-rating trigger. The exact
-global lock column/predicate, trigger bodies, rating trigger, disciplinary RPC,
-and complete schema are not in this repository. Two reviewed adapters are required
+trigger bodies, rating trigger, disciplinary RPC, and complete schema are not in
+this repository. The owner supplied the actual global predicate:
+`status = 'locked' OR locked_at IS NOT NULL`, used by
+`public.prevent_locked_session_edits()`. This identifies the columns; it does not
+establish the trigger's Admin exception, event coverage, session access scope or
+interaction with archive/reopen. Do not replace that function from its name or
+predicate alone. Exact read-only catalog queries are in
+`diagnostics/final_schema_read_only.sql`. Two reviewed adapters are required
 before migration 002 will run:
 
 * `public.batch4_assert_global_access(session uuid, actor uuid) RETURNS void`:
@@ -16,6 +32,8 @@ before migration 002 will run:
   any archived/session-type restrictions. Reject nonexistent sessions and invalid
   actors. Never trust a client-supplied role. Use `auth.uid()` and require actor
   equality. Do not implement using a guessed `locked`/`globally_locked` column.
+  Preserve any real row-access scope enforced by existing policies; a definer RPC
+  must not let staff inspect or change otherwise inaccessible sessions.
 * `public.batch4_finalize_evaluation(session uuid, actor uuid, reviewed jsonb,
   records_only boolean) RETURNS void`: compare the entire reviewed snapshot to
   stored evaluations after locking; validate unique stored callups and attendance,
@@ -121,3 +139,54 @@ grant (temporarily blocking confirmation) over removing closed-workflow protecti
 Any later schema removal requires a compatible client release, snapshot of marker
 values, separately approved removal of dependent functions/triggers, and a verified
 replacement security boundary. Do not use CASCADE or drop existing policies/triggers.
+
+## Final local security pass — 6 November 2026
+
+The unresolved adapters above remain BLOCKED. No migration was executed against
+Supabase. Docker's local engine is unavailable; PGlite uses synthetic definitions.
+
+Additional local preparation in migration 002:
+
+- Callup confirmation requires the entire active/injured/trial/guest roster plus
+  all players already referenced by callups, attendance or evaluations. The client
+  also includes those historical participants even if currently inactive.
+- `p_expected_rows` is an additional optional RPC argument, required specifically
+  for callup confirmation. It compares the original persisted status/evaluable
+  snapshot under the session lock before any upsert. No silent overwrite of a
+  concurrent saved decision. Notes are preserved and are not overwritten.
+- Explicit `not_called`/`guest_not_evaluable` cannot be numerically evaluable.
+  Existing called/trial rows with evaluable=false remain representable; their
+  sporting eligibility is not silently upgraded.
+- Direct authenticated INSERT/UPDATE of session confirmation flags, timestamps or
+  a changed draft origin is rejected. New operational markers require planned
+  status; new sessions must start open. Metadata/archive updates remain subject
+  to their existing RLS/triggers. Coach receives no general session UPDATE policy.
+- A separate invoker trigger prevents direct authenticated writes to evaluated;
+  existing evaluated rows and historical statistics are not rewritten. Finalizing
+  through a reviewed definer adapter still requires the independent guards.
+- Record identity (session and player) cannot be reassigned through an UPDATE.
+- Invoker guards assume PostgREST's existing authenticated/anon database roles and
+  a separately privileged migration owner for the narrow definer RPC. Verify this,
+  ownership, no role impersonation, schema CREATE privileges and all real trigger
+  interactions in the clone. They do not restrict a trusted database owner/service
+  role, which is outside an end user's direct Supabase request context.
+
+The five-argument WIP client can still call non-callup operations through defaults
+on the six-argument RPC, but callup confirmation without a reviewed original
+snapshot is deliberately rejected. An already-installed five-argument overload
+needs an explicitly reviewed upgrade; do not install ambiguous overloads or drop
+existing functions/policies blindly.
+
+The currently deployed pre-Batch-4 frontend confirms by direct session/evaluation
+updates. It is NOT write-compatible with the new guards. Use the maintenance and
+compatible rollback sequence in `FINAL_RELEASE_PLAN.md`; never deploy migration
+002 while old clients are allowed to continue writing.
+
+Frontend confirmation additionally compares evaluation scores, N/A, comments and
+identities before validation and again after its own explicit comment save.
+It rejects changed snapshots. This is not an atomic backend finalizer.
+Cards/suspensions remain separate requests. A verified card followed by a failed
+suspension/accumulation blocks further confirmation in that mounted editor and
+shows the partial state; a reload or another client still requires a real database
+reconciliation. No automatic duplicate repair is attempted. This remains a release
+blocker until the disciplinary adapter is reviewed.

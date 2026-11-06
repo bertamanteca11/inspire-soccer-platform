@@ -1,12 +1,14 @@
 import { attendanceStats } from '../utils/attendance';
 import { loadAttendanceStatistics } from '../lib/attendance';
 import { AttendanceBreakdown } from '../components/AttendanceBreakdown';
-import { isOfficialPerformanceSession, OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
+import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { readPerformancePages } from '../lib/performance';
+import { countableEvaluations } from '../utils/evaluationEligibility';
 import { supabase } from '../supabase';
 import { Card, PageTitle } from '../components/ui';
-import { formatDate, translateAttendance } from '../utils/formatters';
+import { formatDate, translateAttendance, translateSessionType, translateSessionStatus } from '../utils/formatters';
 import { loadAllSessions } from '../lib/data';
 
 export function HistoryPage() {
@@ -19,6 +21,8 @@ export function HistoryPage() {
   const [cards, setCards] = useState<any[]>([]);
   const [suspensions, setSuspensions] = useState<any[]>([]);
   const [view, setView] = useState<'players' | 'cards' | 'summary'>('players');
+  const [historyLoading,setHistoryLoading]=useState(false);
+  const historyRequest=useRef(0);
 
   async function loadSessions() {
     try {
@@ -28,22 +32,25 @@ export function HistoryPage() {
 
   async function loadHistory(sessionId: string) {
     if (!sessionId) return;
-
-    const call = await supabase.from('callups').select('*,players(display_name,position,status)').eq('session_id', sessionId);
-    const att = await loadAttendanceStatistics({sessionId});
-    const ev = await supabase.from('evaluations').select('*,players(display_name)').eq('session_id', sessionId);
-    const ca = await supabase.from('cards').select('*,players(display_name)').eq('session_id', sessionId);
-    const su = await supabase.from('suspensions').select('*,players(display_name)').eq('created_from_session_id', sessionId);
-
-    setCallups(call.data || []);
-    setAttendance(att.data || []); setAttendanceError(att.error?.message || '');
-    setEvaluations(ev.data || []);
-    setCards(ca.data || []);
-    setSuspensions(su.data || []);
+    const request=++historyRequest.current;
+    setHistoryLoading(true);setAttendanceError('');setCallups([]);setAttendance([]);setEvaluations([]);setCards([]);setSuspensions([]);
+    try {
+      const [call,att,ev,ca,su]=await Promise.all([
+        readPerformancePages<any>((a,b)=>supabase.from('callups').select('*,players(display_name,position,status)').eq('session_id',sessionId).order('id').range(a,b)),
+        loadAttendanceStatistics({sessionId}),
+        readPerformancePages<any>((a,b)=>supabase.from('evaluations').select('*,players(display_name)').eq('session_id',sessionId).order('id').range(a,b)),
+        readPerformancePages<any>((a,b)=>supabase.from('cards').select('*,players(display_name)').eq('session_id',sessionId).order('id').range(a,b)),
+        readPerformancePages<any>((a,b)=>supabase.from('suspensions').select('*,players(display_name)').eq('created_from_session_id',sessionId).order('id').range(a,b)),
+      ]);
+      if(request!==historyRequest.current)return;
+      if(att.error)throw new Error(att.error.message);
+      setCallups(call);setAttendance(att.data);setEvaluations(ev);setCards(ca);setSuspensions(su);
+    }catch(error){if(request===historyRequest.current)setAttendanceError(String(error))}
+    finally{if(request===historyRequest.current)setHistoryLoading(false)}
   }
 
   useEffect(() => { loadSessions(); }, []);
-  useEffect(() => { if (selectedSessionId) loadHistory(selectedSessionId); }, [selectedSessionId]);
+  useEffect(() => { if (selectedSessionId) void loadHistory(selectedSessionId);return()=>{historyRequest.current++}; }, [selectedSessionId]);
 
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
 
@@ -76,20 +83,21 @@ export function HistoryPage() {
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [callups, attendance, evaluations, selectedSession]);
 
-  const topPlayers = (isOfficialPerformanceSession(selectedSession) ? [...evaluations] : [])
+  const topPlayers = (selectedSession ? countableEvaluations(evaluations,[selectedSession],callups,attendance).evaluations : [])
     .filter(e => e.evaluated && evaluationTotal(e)!==null)
     .sort((a, b) => Number(evaluationTotal(b)) - Number(evaluationTotal(a)))
     .slice(0, 3);
 
   return (
     <div className="stack">
-      <PageTitle title="Histórico admin" subtitle="Revisa convocatoria, asistencia, evaluaciones, tarjetas y sanciones de cada sesión." />
+      <PageTitle title="Histórico" subtitle="Revisa convocatoria, asistencia, evaluaciones, tarjetas y sanciones de cada sesión." />
 
-      {attendanceError && <p role="alert">No se pudo cargar la asistencia: {attendanceError}</p>}
+      {attendanceError && <p role="alert">No se pudo verificar el historial: {attendanceError}</p>}
+      {historyLoading && <p role="status">Cargando historial de la sesión…</p>}
 
-      <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
+      <select aria-label="Sesión del historial" value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)}>
         {sessions.map(s => (
-          <option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)} · {s.status === 'archived' ? 'Archivada' : s.status}</option>
+          <option key={s.id} value={s.id}>{s.name} · {formatDate(s.session_date)} · {translateSessionStatus(s.status)}</option>
         ))}
       </select>
 
@@ -97,7 +105,7 @@ export function HistoryPage() {
         <Card>
           <p className="kicker">Sesión seleccionada</p>
           <h2>{selectedSession.name}</h2>
-          <p>{formatDate(selectedSession.session_date)} · {selectedSession.type}</p>
+          <p>{formatDate(selectedSession.session_date)} · {translateSessionType(selectedSession.type)}</p>
           {selectedSession.records_only_confirmed && <p className="muted">Registros confirmados · sin puntuaciones deportivas</p>}
         </Card>
       )}
@@ -172,7 +180,7 @@ export function HistoryPage() {
                   <span>Esf: {row.effort_commitment}</span>
                   <span>Dec: {row.decision_making}</span>
                   <span>Act: {row.mentality_attitude}</span>
-                  <span>Coach: {row.coachability}</span>
+                  <span>Quinta cualidad histórica (fuera de la media): {row.coachability}</span>
                 </div>
                 {row.comment && <p className="muted">Comentario: {row.comment}</p>}
               </div>

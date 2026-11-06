@@ -13,6 +13,9 @@ test('workflow reads use actual page lengths and discard incomplete reads',async
   assert.deepEqual(await workflowRows(async offset=>{offsets.push(offset);return {data:pages[index++],error:null}}),{data:[1,2,3],error:null});
   assert.deepEqual(offsets,[0,2,3]);index=0;
   assert.deepEqual(await workflowRows(async()=>++index===1?{data:[1],error:null}:{data:null,error:{message:'denied'}}),{data:[],error:{message:'denied'}});
+  index=0;
+  const incomplete=await workflowRows(async()=>++index===1?{data:[1],error:null}:{data:null,error:null});
+  assert.deepEqual(incomplete.data,[]); assert.match(incomplete.error.message,/incompleta/);
 });
 test('prospective defaults never reinterpret historical, confirmed, unsupported or conflicting callups',()=>{
   assert.deepEqual(callupDraft(session,player,[]),{status:'called_up',evaluable:true});
@@ -22,6 +25,8 @@ test('prospective defaults never reinterpret historical, confirmed, unsupported 
   assert.equal(callupDraft(session,player,[saved,saved]),null);
   assert.deepEqual(callupDraft(session,{...player,status:'guest'},[]),{status:'guest_not_evaluable',evaluable:false});
   assert.deepEqual(callupDraft(session,{...player,status:'trial'},[]),{status:'trial',evaluable:true});
+  assert.equal(callupDraft(session,{...player,status:'inactive'},[]),null);
+  assert.deepEqual(callupDraft(session,{...player,status:'inactive'},[{player_id:'p',status:'called_up',evaluable:true}]),{status:'called_up',evaluable:true});
 });
 test('attendance defaults preserve saved statuses, notes, historical gaps and evaluation requirements',()=>{
   const s={...session,callup_confirmed:true};

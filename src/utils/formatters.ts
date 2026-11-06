@@ -21,8 +21,18 @@ export function translateStatus(status?: string | null) {
 }
 
 export function translateSessionType(type?: string | null) {
-  const map: Record<string, string> = { training: 'Entreno', league_match: 'Partido liga', friendly_match: 'Partido amistoso', tryout: 'Tryout', scrimmage: 'Scrimmage' };
+  const map: Record<string, string> = { training: 'Entreno', league_match: 'Partido liga', friendly_match: 'Partido amistoso', tryout: 'Sesión de prueba', scrimmage: 'Partido interno' };
   return type ? map[type] || type : '';
+}
+
+export function translateSessionStatus(status?: string | null) {
+  const labels:Record<string,string>={planned:'Planificada',completed:'Completada',archived:'Archivada',locked:'Bloqueada'};
+  return status ? labels[status] || status : 'Sin estado';
+}
+
+export function translateCard(type?: string | null) {
+  const labels:Record<string,string>={yellow:'Amarilla',double_yellow:'Doble amarilla',straight_red:'Roja directa'};
+  return type ? labels[type] || type : 'Sin tarjeta';
 }
 
 export function translateInjuryStatus(status?: string | null) {

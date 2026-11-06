@@ -1,9 +1,10 @@
 import { VeoProvider } from './veo/VeoContext';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 import type { Attendance, Evaluation, Player, Role } from './types';
 import type { AppSession, PlayerCardTotal, Tab } from './utils/appTypes';
 import { getNextAvailableSession } from './lib/data';
+import { readPerformancePages } from './lib/performance';
 import { ACTIVE_SESSION_STATUSES, isActiveSession } from './utils/sessionArchive';
 import { ApplicationShell } from './components/shell/ApplicationShell';
 import { Card, Screen } from './components/ui';
@@ -19,7 +20,8 @@ import { SummaryPage } from './pages/SummaryPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { StandoutsPage } from './pages/StandoutsPage';
 import { IntelligencePage } from './pages/IntelligencePage';
-import { ReportsPage } from './pages/ReportsPage';
+
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(module => ({ default: module.ReportsPage })));
 
 const VeoAnalytics = lazy(() => import('./pages/VeoModule').then(module => ({ default: module.VeoModule })));
 
@@ -31,31 +33,51 @@ export default function App() {
   const [role, setRole] = useState<Role>('viewer');
   const [roleUserId, setRoleUserId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [roleAttempt, setRoleAttempt] = useState(0);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }: any) => {
+    let active = true;
+    let authChanged = false;
+    supabase.auth.getSession().then(({ data, error }: any) => {
+      if (!active || authChanged) return;
       setUser(data.session?.user ?? null);
+      if (error) setAuthError('No se pudo verificar la sesión. Vuelve a iniciar sesión.');
       setLoading(false);
+    }, () => {
+      if (active && !authChanged) { setAuthError('No se pudo verificar la sesión.'); setLoading(false); }
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+      authChanged = true;
       setUser(session?.user ?? null);
+      setLoading(false);
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setRoleUserId(''); setRole('viewer'); setAuthError('');
     if (!user) return;
-
-    supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data }: any) => {
-      if (data?.role) { setRole(data.role); setRoleUserId(user.id); }
-    });
-  }, [user]);
+    supabase.from('profiles').select('role').eq('id', user.id).single().then(({ data, error }: any) => {
+      if (cancelled) return;
+      if (error || !['admin', 'coach', 'viewer'].includes(data?.role)) {
+        setAuthError('No se pudieron verificar tus permisos. Reintenta antes de acceder a los datos.');
+        return;
+      }
+      setRole(data.role); setRoleUserId(user.id);
+    }, () => { if (!cancelled) setAuthError('No se pudieron verificar tus permisos.'); });
+    return () => { cancelled = true; };
+  }, [user?.id, roleAttempt]);
 
   if (loading) return <Screen><p>Cargando...</p></Screen>;
   if (DEV_BYPASS_LOGIN) return <Platform role="admin" />;
   if (!user) return <LoginPage logoUrl={LOGO_URL} />;
+  if (roleUserId !== user.id) return <Screen>{authError
+    ? <Card><p role="alert">{authError}</p><button onClick={() => setRoleAttempt(n => n + 1)}>Reintentar permisos</button><button onClick={() => void supabase.auth.signOut()}>Cerrar sesión</button></Card>
+    : <p role="status">Verificando permisos…</p>}</Screen>;
 
   // Direct authenticated entry avoids mounting operational pages/RPCs when
   // opening a local preview. It never bypasses login or role verification.
@@ -64,7 +86,7 @@ export default function App() {
   if (query.get('veo-preview') === '1' || query.get('veo') === '1') {
     return <VeoProvider key={user.id} role={previewRole}><Screen><Suspense fallback={<p>Cargando VEO...</p>}><VeoAnalytics initialSection={query.get('veo-preview') === '1' ? 'import' : query.has('player') ? 'players' : 'dashboard'}/></Suspense></Screen></VeoProvider>;
   }
-  return <VeoProvider key={user.id} role={previewRole}><Platform role={role} previewRole={previewRole}/></VeoProvider>;
+  return <VeoProvider key={user.id} role={previewRole}><Platform key={user.id} role={previewRole} previewRole={previewRole}/></VeoProvider>;
 }
 
 function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: Role }) {
@@ -78,20 +100,18 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
   const [error, setError] = useState('');
   const [loadingData, setLoadingData] = useState(true);
   const [summarySessionId, setSummarySessionId] = useState('');
+  const loadRequest = useRef(0);
 
   const isAdmin = role === 'admin';
   const isCoach = role === 'coach';
 
   async function load(targetSessionId?: string) {
+    const request = ++loadRequest.current;
     setLoadingData(true);
     setError('');
-
-    let next: AppSession | null;
-    try { next = await getNextAvailableSession(); }
-    catch (failure) {
-      setError('No se pudo cargar la sesión operativa: ' + String(failure));
-      setNextSession(null); setSelectedSession(null); setPlayers([]); setAttendance([]); setEvaluations([]); setCardTotals([]); setLoadingData(false); return;
-    }
+    try {
+    const next = await getNextAvailableSession();
+    if (request !== loadRequest.current) return;
     setNextSession(next);
 
     const workingSessionId = targetSessionId || selectedSession?.id || next?.id;
@@ -99,10 +119,10 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
 
     if (workingSessionId) {
       const { data, error } = await supabase.from('sessions').select('*').eq('id', workingSessionId).in('status', [...ACTIVE_SESSION_STATUSES]).maybeSingle();
-      if (error) { setError('No se pudo verificar la sesión seleccionada: ' + error.message); workingSession = null; }
-      else if (isActiveSession(data)) workingSession = data as AppSession;
+      if (error) throw new Error('No se pudo verificar la sesión seleccionada: ' + error.message);
+      workingSession = isActiveSession(data) ? data as AppSession : null;
     }
-
+    if (request !== loadRequest.current) return;
     setSelectedSession(workingSession || null);
 
     if (!workingSession) {
@@ -114,61 +134,23 @@ function Platform({ role, previewRole = 'viewer' }: { role: Role; previewRole?: 
       return;
     }
 
-const [callups, att] = await Promise.all([
-  supabase
-    .from('callups')
-    .select('player_id, evaluable, status, players(*)')
-    .eq('session_id', workingSession.id)
-    .neq('status', 'not_called')
-    .order('created_at'),
-
-  supabase
-    .from('attendance')
-    .select('*')
-    .eq('session_id', workingSession.id)
-]);
-
-if (callups.error) {
-  setError(`Error cargando convocatoria: ${callups.error.message}`);
-}
-
-if (att.error) {
-  setError(`Error cargando asistencia: ${att.error.message}`);
-}
-
-const attendanceRows = (att.data || []) as Attendance[];
-setAttendance(attendanceRows);
-
-// IDs de jugadores convocados o con asistencia registrada.
-const playerIds = [
-  ...new Set([
-    ...(callups.data || []).map(row => row.player_id),
-    ...attendanceRows.map(row => row.player_id)
-  ])
-];
-
-if (playerIds.length > 0) {
-  const { data: sessionPlayers, error: playersError } = await supabase
-    .from('players')
-    .select('*')
-    .in('id', playerIds);
-
-  if (playersError) {
-    setError(`Error cargando jugadores: ${playersError.message}`);
-  }
-
-  setPlayers((sessionPlayers || []) as Player[]);
-} else {
-  setPlayers([]);
-}
-
-    const ev = await supabase.from('evaluations').select('*').eq('session_id', workingSession.id);
-    setEvaluations(ev.data || []);
-
-    const cards = await supabase.from('player_card_totals').select('*');
-    setCardTotals((cards.data || []) as PlayerCardTotal[]);
-
-    setLoadingData(false);
+    const sid = workingSession.id;
+    const [calls, visits, roster, ev, totals] = await Promise.all([
+      readPerformancePages<{player_id:string}>((a,b) => supabase.from('callups').select('id,player_id').eq('session_id',sid).neq('status','not_called').order('id').range(a,b)),
+      readPerformancePages<Attendance>((a,b) => supabase.from('attendance').select('*').eq('session_id',sid).order('id').range(a,b)),
+      readPerformancePages<Player>((a,b) => supabase.from('players').select('*').order('id').range(a,b)),
+      readPerformancePages<Evaluation>((a,b) => supabase.from('evaluations').select('*').eq('session_id',sid).order('id').range(a,b)),
+      readPerformancePages<PlayerCardTotal>((a,b) => supabase.from('player_card_totals').select('*').order('player_id').range(a,b)),
+    ]);
+    if (request !== loadRequest.current) return;
+    const ids = new Set([...calls, ...visits, ...ev].map(row => row.player_id));
+    if ([...ids].some(id => !roster.some(p => p.id === id))) throw new Error('La plantilla de la sesión está incompleta. No se pueden verificar los participantes.');
+    setPlayers(roster.filter(p => ids.has(p.id))); setAttendance(visits); setEvaluations(ev); setCardTotals(totals);
+    } catch (failure) {
+      if (request !== loadRequest.current) return;
+      setError('No se pudieron verificar los datos de la sesión: ' + String(failure));
+      setNextSession(null); setSelectedSession(null); setPlayers([]); setAttendance([]); setEvaluations([]); setCardTotals([]);
+    } finally { if (request === loadRequest.current) setLoadingData(false); }
   }
 
   async function moveToNextOpenSession() {
@@ -187,7 +169,8 @@ if (playerIds.length > 0) {
   useEffect(() => { if (tab !== 'summary') setSummarySessionId(''); }, [tab]);
 
   useEffect(() => {
-    load();
+    void load();
+    return () => { loadRequest.current++; };
   }, []);
 
   useEffect(() => {
@@ -212,10 +195,10 @@ if (playerIds.length > 0) {
           {tab === 'attendance' && selectedSession && <AttendancePage role={role} session={selectedSession} players={players} attendance={attendance} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'evaluation' && selectedSession && <EvaluationPage role={role} session={selectedSession} players={players} evaluations={evaluations} reload={load} setError={setError} moveToNextOpenSession={moveToNextOpenSession} />}
           {tab === 'injuries' && selectedSession && <InjuriesPage session={selectedSession} players={players} reload={load} setError={setError} role={role} />}
-          {tab === 'summary' && <SummaryPage initialSessionId={summarySessionId} />}
+          {tab === 'summary' && <SummaryPage initialSessionId={summarySessionId} onReviewAttendance={isAdmin ? id => { void load(id); setTab('attendance'); } : undefined} />}
           {tab === 'standouts' && <StandoutsPage role={role} />}
           {tab === 'intelligence' && isAdmin && <IntelligencePage />}
-          {tab === 'reports' && (isAdmin || isCoach) && <ReportsPage />}
+          {tab === 'reports' && (isAdmin || isCoach) && <Suspense fallback={<Card><p role="status">Cargando informes…</p></Card>}><ReportsPage /></Suspense>}
           {tab === 'veo' && <Suspense fallback={<Card><p>Cargando visor VEO...</p></Card>}><VeoAnalytics/></Suspense>}
           {tab === 'history' && (isAdmin || isCoach) && <HistoryPage />}
 

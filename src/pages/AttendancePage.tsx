@@ -18,7 +18,7 @@ const attendanceOptions = [
   ['late', 'Tarde'],
   ['justified_late', 'Tarde justificado'],
   ['justified_absence', 'Ausencia justificada'],
-  ['unjustified_absence', 'Ausencia'],
+  ['unjustified_absence', 'Ausencia injustificada'],
   ['injured', 'Lesionado (sin especificar)'],
   ['injured_present', 'Lesionado presente (fisio)'],
   ['injured_justified_absence', 'Lesionado ausente justificado'],
@@ -103,7 +103,7 @@ export function AttendancePage({
   async function saveAttendance(): Promise<boolean> {
     if (locked || saving || rosterLoading || rosterError || !savePlayers.length) return false;
     const rows = selectedRows();
-    if (rows.some(row => !row.status)) { setError('Selecciona la situación de los jugadores pendientes antes de guardar.'); return false; }
+    if (rows.some(row => !attendanceOptions.some(([value]) => value === row.status))) { setError('Selecciona la situación de los jugadores pendientes; utiliza un estado válido antes de guardar.'); return false; }
     setSaving(true); setError(''); setSavedNotice('');
     try {
       const result = await supabase.from('attendance').upsert(rows, { onConflict: 'session_id,player_id' });
@@ -180,7 +180,7 @@ export function AttendancePage({
         {localLocked ? (
           <div className="stack">
             <button className="primary confirmed" disabled><CheckCircle2 size={18} /> Asistencia cerrada</button>
-            {isAdmin && <button className="secondary danger" onClick={reopenAttendance}><RotateCcw size={16} /> Reabrir asistencia</button>}
+            {isAdmin && <button className="secondary danger" disabled={saving} onClick={reopenAttendance}><RotateCcw size={16} /> Reabrir asistencia</button>}
           </div>
         ) : (
           <div className="stack">
@@ -197,7 +197,7 @@ export function AttendancePage({
       {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
       {rosterLoading && <p role="status">Cargando plantilla y convocatoria…</p>}
       {rosterError && <p role="alert">No se puede guardar sin verificar la plantilla: {rosterError}</p>}
-      <Card><p className="muted">«Sin registrar» no suma presencia ni ausencia. Revisa el estado de cada jugador, incluidos los no convocados. Las notas existentes se conservan.</p></Card>
+      <Card><p className="muted">«Sin registrar» no suma presencia ni ausencia. Revisa el estado de cada jugador, incluidos los no convocados. «Ausencia injustificada» y «Ausencia justificada» cuentan por separado. Las notas existentes se conservan al cambiar el estado.</p>{localLocked && isAdmin && <p className="muted">Para corregir una asistencia, pulsa «Reabrir asistencia», cambia el estado, guarda y vuelve a confirmar.</p>}</Card>
       {attendancePlayers.map((p: Player) => {
         const draft = drafts[p.id] || { status: '', notes: '' };
         const needs = attendanceNeedsExplanation.includes(draft.status);

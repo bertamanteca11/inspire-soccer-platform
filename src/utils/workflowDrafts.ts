@@ -13,7 +13,7 @@ export function defaultCallup(player: Player): CallupChoice {
 export function callupDraft(session: AppSession, player: Player, rows: (CallupChoice & { player_id: string })[]): CallupChoice | null {
   const matches = rows.filter(row => row.player_id === player.id);
   if (matches.length === 1) return { status: matches[0].status, evaluable: matches[0].evaluable };
-  if (matches.length || session.callup_confirmed || !usesDraftDefaults(session)) return null;
+  if (matches.length || session.callup_confirmed || !usesDraftDefaults(session) || !['active','injured','trial','guest'].includes(player.status)) return null;
   return defaultCallup(player);
 }
 export function operationalAttendanceDraft(session: AppSession, playerId: string, rows: Attendance[], called: boolean): AttendanceDraft {

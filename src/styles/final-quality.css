@@ -1,0 +1,34 @@
+/* Native modal behavior, without changing the approved shell or club palette. */
+dialog.modal-backdrop {
+  margin: 0;
+  border: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  color: inherit;
+}
+dialog.modal-backdrop::backdrop { background: transparent; }
+.modal-card { overscroll-behavior: contain; max-height: 88dvh; }
+.modal-card > .row:first-child {
+  position: sticky;
+  top: -18px;
+  z-index: 1;
+  background: white;
+  padding-block: 8px;
+}
+.form-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.club-main .card, .modal-card { overflow-wrap: anywhere; }
+.club-main input, .club-main select, .modal-card input, .modal-card select { min-width: 0; max-width: 100%; }
+.club-main .rating, .club-main .rating-player-row { min-width: 0; }
+.player-toolbar .page-title { flex: 1; min-width: 0; }
+.player-inactive-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.player-inactive-toggle input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex: 0 0 20px; }
+/* The legacy opacity on muted text reduced contrast below AA. Use the existing
+   premium secondary-text color, preserving the separate VEO page palette. */
+.club-main > .stack:not(.veo-module) .muted,
+.club-main > .card .muted,
+.modal-card .muted { color: #536176; opacity: 1; }
+@media (max-width: 360px) {
+  .club-main .rating { grid-template-columns: repeat(3, minmax(44px, 1fr)); }
+}

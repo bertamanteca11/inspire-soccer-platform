@@ -41,8 +41,8 @@ test('duplicate evaluation groups are excluded without deleting records or choos
   assert.equal(counted(input).evaluations.length,0);assert.equal(counted(input).excluded.length,2);
   assert.equal(counted([row,{...row}]).evaluations.length,1);assert.equal(JSON.stringify(input),before);
 });
-test('five-field training baseline is explicit, preserves history, and new draft defaults cannot affect averages',()=>{
-  assert.equal(evaluationTotal({...row,coachability:3}),4.6);
+test('four-field current scoring preserves the retired quality and explicit N/A prevents default averages',()=>{
+  assert.equal(evaluationTotal({...row,coachability:3}),5);
   const draft={...row,...newEvaluationDraft()};assert.equal(evaluationTotal(draft),null);
   const explicit={...draft,tactical_discipline:4,na_fields:{...draft.na_fields,tactical_discipline:false}};
   assert.equal(evaluationTotal(explicit),4);assert.equal(evaluationTotal({...explicit,coachability:1}),4);

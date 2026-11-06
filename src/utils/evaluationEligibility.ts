@@ -79,6 +79,8 @@ export function ratingLimit(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) throw new Error('Límite de puntuación inválido; revisar la sesión.');
   return value;
 }
-export function newEvaluationDraft() {
-  return { evaluated: false, na_fields: Object.fromEntries(SCORE_FIELDS.map(field => [field,true])) };
+export function newEvaluationDraft(defaultToThree = false) {
+  return { evaluated: false,
+    ...(defaultToThree ? Object.fromEntries(SCORE_FIELDS.map(field => [field,3])) : {}),
+    na_fields: { ...Object.fromEntries(SCORE_FIELDS.map(field => [field,!defaultToThree])), coachability: true } };
 }

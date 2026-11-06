@@ -48,10 +48,11 @@ test('N/A and missing scores are excluded without replacing them with zero', () 
   assert.equal(evaluationTotal(null), null);
 });
 
-test('existing five-field methodology remains unchanged', () => {
-  assert.equal(SCORE_FIELDS.length, 5);
-  const row = Object.fromEntries(SCORE_FIELDS.map((field, index) => [field, index === 4 ? 3 : 5]));
-  assert.equal(evaluationTotal(row), 4.6);
+test('Susan-approved current methodology averages four qualities and excludes the retired fifth', () => {
+  assert.equal(SCORE_FIELDS.length, 4);
+  const row = {...Object.fromEntries(SCORE_FIELDS.map(field => [field, 5])),coachability:1};
+  assert.equal(evaluationTotal(row), 5);
+  assert.equal(row.coachability,1);
 });
 
 test('jerseys sort numerically, missing last, duplicate numbers alphabetically, without mutation', () => {

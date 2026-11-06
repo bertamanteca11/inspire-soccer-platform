@@ -24,6 +24,7 @@ function Harness() {
   const [selected, setSelected] = React.useState<AppSession | null>(null);
   const [historyId, setHistoryId] = React.useState('');
   const [navigation, setNavigation] = React.useState('');
+  const [reviewAttendanceId, setReviewAttendanceId] = React.useState('');
   const role = (query.get('role') || 'admin') as Role;
   const contextSession = { ...sportSessions[0], name: query.has('long') ? 'Partido domingo con nombre de sesión extraordinariamente largo para revisión móvil' : sportSessions[0].name, opponent: "L'Hospitalense" };
   const wrap = (node: React.ReactNode, title: string, tab: import('../src/utils/appTypes').Tab) => query.has('shell') ? <ApplicationShell role={role} title={title} tab={tab} setTab={setNavigation} selectedSessionLabel={contextSession.name} onLogout={()=>{}}>
@@ -40,10 +41,10 @@ function Harness() {
     <p>Selección operativa: {selected?.name || 'ninguna'}</p>
     <SessionsPage role={(query.get('role') || 'admin') as Role} selectedSession={selected} setSelectedSession={setSelected} reload={async () => {}} onViewHistory={setHistoryId}/>
   </>;
-  return query.get('mode') === 'editor' ? <>
+  return query.get('mode') === 'editor' || reviewAttendanceId ? <>
     {error && <p role="alert">{error}</p>}
-    <AttendancePage role="admin" session={{ ...sessions.find(s => s.id === sessionId)!, high_rating_limit: 6, callup_confirmed: true, attendance_confirmed: false }}
-      players={players} attendance={attendance.filter(a => a.session_id === sessionId)} reload={async () => {}} setError={setError}/>
-  </> : <SummaryPage/>;
+    <AttendancePage role="admin" session={{ ...sessions.find(s => s.id === (reviewAttendanceId||sessionId))!, high_rating_limit: 6, callup_confirmed: true, attendance_confirmed: !!reviewAttendanceId }}
+      players={players} attendance={attendance.filter(a => a.session_id === (reviewAttendanceId||sessionId))} reload={async () => {}} setError={setError}/>
+  </> : <SummaryPage onReviewAttendance={role==='admin'?setReviewAttendanceId:undefined}/>;
 }
 createRoot(document.getElementById('root')!).render(<Harness/>);

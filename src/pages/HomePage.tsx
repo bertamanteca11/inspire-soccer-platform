@@ -43,11 +43,11 @@ export function HomePage({
   setTab: (tab: Tab) => void;
 }) {
   const [performanceError, setPerformanceError] = useState('');
-  const [excludedCount, setExcludedCount] = useState(0);
   const [topMode, setTopMode] = useState<'matches' | 'trainings'>('matches');
   const [topMatches, setTopMatches] = useState<TopPlayer[]>([]);
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
   const [suspensions, setSuspensions] = useState<any[]>([]);
+  const [suspensionError, setSuspensionError] = useState('');
 
   const [sessionCounts, setSessionCounts] = useState({ id: '', evaluated: 0, eligible: 0 });
   const performanceRequest = useRef(0);
@@ -72,27 +72,29 @@ export function HomePage({
       if (request !== performanceRequest.current) return;
       const eligible = new Set(result.callups.filter(c => c.player_id && c.session_id && c.session_id === selectedSession?.id && !eligibilityReason(c.session_id,c.player_id,result.callups,result.attendance)).map(c => c.player_id));
       setSessionCounts({ id: selectedSession?.id || '', evaluated: result.evaluations.filter(e => e.session_id === selectedSession?.id).length, eligible: eligible.size });
-      setPerformanceError(''); setExcludedCount(result.excluded.length);
+      setPerformanceError('');
       setTopMatches(buildTopRanking(result.evaluations.filter(r => r.sessions.type !== 'training')));
       setTopTrainings(buildTopRanking(result.evaluations.filter(r => r.sessions.type === 'training')));
-    } catch (failure) { if(request===performanceRequest.current){setPerformanceError(String(failure)); setExcludedCount(0); setTopMatches([]); setTopTrainings([]);setSessionCounts({id:'',evaluated:0,eligible:0});} }
+    } catch (failure) { if(request===performanceRequest.current){setPerformanceError(String(failure)); setTopMatches([]); setTopTrainings([]);setSessionCounts({id:'',evaluated:0,eligible:0});} }
   }
 
   async function loadSuspensions() {
-    await supabase.rpc('create_yellow_accumulation_suspensions');
-
-    const { data } = await supabase
+    // Opening a dashboard is a read. Disciplinary calculation remains in the
+    // existing explicit card-save / evaluation-confirmation paths.
+    const { data, error } = await supabase
       .from('active_suspensions')
       .select('*')
       .order('matches_remaining', { ascending: false });
 
-    setSuspensions(data || []);
+    setSuspensions(error ? [] : data || []);
+    setSuspensionError(error ? 'No se pudieron verificar las sanciones: '+error.message : '');
   }
 
   const activeTop = topMode === 'matches' ? topMatches : topTrainings;
 
   return (
     <div className="stack home-dashboard">
+      {suspensionError && <p role="alert">{suspensionError}</p>}
       <Card className="hero-card">
         <div className="hero-inner">
           <div>
@@ -128,9 +130,10 @@ export function HomePage({
       {(cardWarnings.length > 0 || suspensions.length > 0) && (
         <Card>
           <div className="row">
-            <p className="kicker">Avisos tarjetas y sanciones</p>
+            <p className="kicker">Tarjetas históricas y sanciones activas</p>
             <AlertTriangle size={18} />
           </div>
+          <p className="muted">Las tarjetas muestran el total histórico. La cuenta actual de acumulación y las sanciones cumplidas se consultan en Convocatoria.</p>
 
           <ProgressiveAlerts items={[
               ...suspensions.map((s: any) => ({ key: 'suspension-' + s.id, content:
@@ -167,7 +170,6 @@ export function HomePage({
 
         <p className="muted">{OFFICIAL_PERFORMANCE_LABEL}</p>
         {performanceError && <p role="alert">Rendimiento operativo: {performanceError}</p>}
-        {!!excludedCount && <details><summary>Evaluaciones excluidas: {excludedCount}</summary><p>Fuera de alcance, no elegibles o incompletas. Los originales se conservan.</p></details>}
         {activeTop.length > 0 ? (
           activeTop.map((p, index) => (
             <div className="top-row" key={p.id}>

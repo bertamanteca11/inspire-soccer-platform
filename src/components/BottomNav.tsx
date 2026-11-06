@@ -40,7 +40,7 @@ export function BottomNav({ role, tab, setTab }: { role: Role; tab: Tab; setTab:
   }, []);
   return <>
     <PremiumScope className="club-sidebar">
-      <div className="club-brand"><ClubCrest/><div><strong>Inspire Soccer</strong><span>Club workspace</span></div></div>
+      <div className="club-brand"><ClubCrest/><div><strong>Inspire Soccer</strong><span>Espacio del club</span></div></div>
       <nav aria-label="Navegación principal">{navigationGroups.map(group => {
         const grouped = items.filter(item => item.group === group);
         return grouped.length ? <div className="club-nav-group" key={group}><p>{group}</p>{grouped.map(item => {

@@ -4,6 +4,7 @@ export type AttendanceRecord = {
   player_id?: string;
   session_id?: string;
   status?: string | null;
+  notes?: string | null;
   players?: { display_name?: string } | null;
 };
 
@@ -93,7 +94,8 @@ export async function readAttendancePages<T extends AttendanceRecord>(
   for (let offset = 0; ; ) {
     const result = await readPage(offset, offset + 499);
     if (result.error) return { data: [], error: result.error };
-    if (!result.data?.length) return { data: uniqueAttendanceRecords(rows), error: null };
+    if (!Array.isArray(result.data)) return { data: [], error: {message:'Lectura incompleta de asistencia. Recarga antes de continuar.'} };
+    if (!result.data.length) return { data: uniqueAttendanceRecords(rows), error: null };
     rows.push(...result.data);
     offset += result.data.length;
   }

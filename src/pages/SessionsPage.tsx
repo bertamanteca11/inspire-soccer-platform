@@ -1,13 +1,14 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
-import { buildSessionLabel, translateSessionType } from '../utils/formatters';
+import { buildSessionLabel, translateSessionType, translateSessionStatus } from '../utils/formatters';
 import { Card, Modal, PageTitle } from '../components/ui';
 import { loadAllSessions } from '../lib/data';
 import { changeSessionArchiveStatus } from '../lib/sessionArchive';
 import { isActiveSession, sessionWriteError, verifiedSessionRow } from '../utils/sessionArchive';
+import { copenhagenToday } from '../utils/copenhagenDates';
 
 type Props = {
   role: Role; reload: (id?: string) => Promise<void>; selectedSession: AppSession | null;
@@ -15,7 +16,7 @@ type Props = {
   onViewHistory?: (id: string) => void;
   onArchiveChange?: (session: AppSession) => Promise<void>;
 };
-const emptyForm = () => ({ name: '', session_date: new Date().toISOString().slice(0, 10), start_time: '', type: 'training', responsible: '', opponent: '', home_away: 'home', status: 'planned' });
+const emptyForm = () => ({ name: '', session_date: copenhagenToday(), start_time: '', type: 'training', responsible: '', opponent: '', home_away: 'home', status: 'planned' });
 export function SessionsPage({ role, reload, selectedSession, setSelectedSession, onViewHistory, onArchiveChange }: Props) {
   const [sessions, setSessions] = useState<AppSession[]>([]);
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
@@ -90,14 +91,14 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
     <button className="secondary" disabled={busy || loading} onClick={() => void loadSessions()}>Actualizar sesiones</button>
     {message && <p role={message.error ? 'alert' : 'status'} className={message.error ? 'error' : 'success'}>{message.text}</p>}
     {loading ? <Card><p role="status">Cargando sesiones…</p></Card> : !visible.length ? <Card><p>{view === 'active' ? 'No hay sesiones activas.' : 'No hay sesiones archivadas.'}</p></Card> : visible.map(s => <Card key={s.id} className={selectedSession?.id === s.id ? 'session-card current' : 'session-card'}>
-      <strong>{s.name}</strong><p>{buildSessionLabel(s)}</p><p>{translateSessionType(s.type)} · {s.status}</p><small>{s.id}</small>
+      <strong>{s.name}</strong><p>{buildSessionLabel(s)}</p><p>{translateSessionType(s.type)} · {translateSessionStatus(s.status)}</p><small>{s.id}</small>
       <div className="row">
         {isActiveSession(s) && <><button className="secondary" disabled={busy} onClick={() => { setSelectedSession(s); void reload(s.id).catch(error => setMessage({ text: String(error), error: true })); }}>Seleccionar sesión</button>{canEdit && <button className="chip" disabled={busy} onClick={() => openEdit(s)}>Editar</button>}</>}
         {onViewHistory && <button className="secondary" disabled={busy} onClick={() => onViewHistory(s.id)}>Ver registros históricos</button>}
         {canArchive && <button className="secondary" disabled={busy} onClick={() => { setArchiveDialog(s); setRestoreAs(''); setMessage(null); }}>{s.status === 'archived' ? 'Restaurar sesión' : 'Archivar sesión'}</button>}
       </div>
     </Card>)}
-    {!!other.length && <Card><p role="alert">{other.length} sesiones con estado no operativo. Se conservan y pueden consultarse en el historial.</p>{other.map(s => <p key={s.id}>{s.name} · {s.status} {onViewHistory && <button onClick={() => onViewHistory(s.id)}>Ver registros históricos</button>}</p>)}</Card>}
+    {!!other.length && <Card><p role="alert">{other.length} sesiones con estado no operativo. Se conservan y pueden consultarse en el historial.</p>{other.map(s => <p key={s.id}>{s.name} · {translateSessionStatus(s.status)} {onViewHistory && <button onClick={() => onViewHistory(s.id)}>Ver registros históricos</button>}</p>)}</Card>}
     {archiveDialog && <Modal title={archiveDialog.status === 'archived' ? 'Restaurar sesión' : 'Archivar sesión'} onClose={() => { if (!busy) setArchiveDialog(null); }}>
       <p><strong>{archiveDialog.name}</strong> · {archiveDialog.session_date}</p><p>Sesión {archiveDialog.id}</p>
       <p>Esta acción solo cambia el estado. No elimina ni modifica asistencia, evaluaciones, convocatoria, límites de puntuación ni registros históricos.</p>

@@ -12,7 +12,7 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       CREATE TABLE profiles(id uuid PRIMARY KEY,role text);
       INSERT INTO profiles VALUES('${admin}','admin'),('${coach}','coach'),('${viewer}','viewer');
-      CREATE TABLE sessions(id uuid PRIMARY KEY, globally_locked boolean DEFAULT false,
+      CREATE TABLE sessions(id uuid PRIMARY KEY, status text DEFAULT 'planned', globally_locked boolean DEFAULT false,
         callup_confirmed boolean NOT NULL DEFAULT false,callup_confirmed_at timestamptz,
         attendance_confirmed boolean NOT NULL DEFAULT false,attendance_confirmed_at timestamptz,
         evaluation_confirmed boolean NOT NULL DEFAULT false,evaluation_confirmed_at timestamptz,records_only_confirmed boolean DEFAULT false);
@@ -20,6 +20,8 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       CREATE TABLE attendance(session_id uuid REFERENCES sessions,player_id uuid,status text,notes text,UNIQUE(session_id,player_id));
       CREATE TABLE evaluations(session_id uuid REFERENCES sessions,player_id uuid,evaluated boolean);
       CREATE TABLE cards(session_id uuid REFERENCES sessions,player_id uuid,type text);
+      CREATE TABLE players(id uuid PRIMARY KEY,status text);
+      INSERT INTO players VALUES('${pid}','active');
       INSERT INTO sessions(id) VALUES('${sid}');
       GRANT USAGE ON SCHEMA public,auth TO authenticated;
       GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
@@ -31,7 +33,8 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       ALTER TABLE cards ENABLE ROW LEVEL SECURITY;
       CREATE POLICY read_sessions ON sessions FOR SELECT TO authenticated USING(true);
       CREATE POLICY admin_sessions ON sessions FOR UPDATE TO authenticated USING(EXISTS(SELECT 1 FROM profiles WHERE id=auth.uid() AND role='admin'));
-      GRANT UPDATE ON sessions TO authenticated;
+      GRANT INSERT,UPDATE ON sessions TO authenticated;
+      CREATE POLICY admin_session_insert ON sessions FOR INSERT TO authenticated WITH CHECK(EXISTS(SELECT 1 FROM profiles WHERE id=auth.uid() AND role='admin'));
       CREATE POLICY callup_admin ON callups TO authenticated USING(EXISTS(SELECT 1 FROM profiles WHERE id=auth.uid() AND role='admin'));
       CREATE POLICY attendance_staff ON attendance TO authenticated USING(EXISTS(SELECT 1 FROM profiles WHERE id=auth.uid() AND role IN ('admin','coach')));
       CREATE POLICY evaluation_staff ON evaluations TO authenticated USING(EXISTS(SELECT 1 FROM profiles WHERE id=auth.uid() AND role IN ('admin','coach')));
@@ -55,7 +58,8 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
         RAISE EXCEPTION 'Evaluation adapter intentionally blocked in synthetic fixture'; END $$;`);
     await db.exec(sql('002_workflow_security.sql'));
     const auth=async who=>db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.sub','${who}',false); SET ROLE authenticated;`);
-    const action=(wf,act,rows=[])=>db.query('SELECT batch4_workflow_action($1,$2,$3,$4::jsonb,false) AS result',[sid,wf,act,JSON.stringify(rows)]);
+    const snapshot=async()=> (await db.query('SELECT session_id,player_id,status,evaluable FROM callups WHERE session_id=$1 ORDER BY player_id',[sid])).rows;
+    const action=async(wf,act,rows=[],expected)=>db.query('SELECT batch4_workflow_action($1,$2,$3,$4::jsonb,false,$5::jsonb) AS result',[sid,wf,act,JSON.stringify(rows),JSON.stringify(expected ?? (wf==='callup'?await snapshot():null))]);
     const call=[{session_id:sid,player_id:pid,status:'called_up',evaluable:true}];
     const visits=[{session_id:sid,player_id:pid,status:'present',notes:null}];
     await t.test('Coach cannot manage callups, reopen, or generally update sessions',async()=>{
@@ -74,6 +78,31 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       assert.equal((await db.query('SELECT status FROM callups')).rows[0].status,'not_called');
       await action('callup','confirm',call);
     });
+    await t.test('Admin cannot bypass reviewed workflows through direct session flags or origin changes',async()=>{
+      await auth(admin);
+      for (const patch of ['callup_confirmed=false','attendance_confirmed=true','evaluation_confirmed=true',"evaluation_confirmed_at=now()",'records_only_confirmed=true','draft_defaults_version=1']) {
+        await assert.rejects(db.exec('UPDATE sessions SET '+patch),/reviewed workflow RPC/);
+      }
+      await assert.rejects(db.query('INSERT INTO sessions(id,callup_confirmed) VALUES($1,true)',[id(85)]),/Create an open session/);
+      await assert.rejects(db.query('INSERT INTO sessions(id,draft_defaults_version,status) VALUES($1,1,NULL)',[id(87)]),/Create an open session/);
+      await db.query('INSERT INTO sessions(id,draft_defaults_version) VALUES($1,1)',[id(86)]);
+      await db.query('UPDATE sessions SET status=$1 WHERE id=$2',['completed',id(86)]);
+    });
+    await t.test('partial or stale callup rosters and inconsistent guest flags roll back without confirmation',async()=>{
+      await auth(admin); await action('callup','reopen');
+      await db.exec(`RESET ROLE; INSERT INTO players VALUES('${id(22)}','active');`); await auth(admin);
+      await assert.rejects(action('callup','confirm',call),/Incomplete or changed/);
+      assert.equal((await db.query('SELECT callup_confirmed FROM sessions WHERE id=$1',[sid])).rows[0].callup_confirmed,false);
+      const full=[...call,{session_id:sid,player_id:id(22),status:'guest_not_evaluable',evaluable:true}];
+      await assert.rejects(action('callup','confirm',full),/Invalid reviewed/);
+      full[1].evaluable=false;
+      await assert.rejects(action('callup','confirm',full,[]),/Stale callup snapshot/);
+      const before=await snapshot();
+      await db.exec("UPDATE callups SET status='not_called',evaluable=false");
+      await assert.rejects(action('callup','confirm',full,before),/Stale callup snapshot/);
+      await db.exec(`RESET ROLE; DELETE FROM players WHERE id='${id(22)}';`);await auth(admin);
+      await action('callup','confirm',call);
+    });
     await t.test('attendance requires explicit complete save and exact snapshot, then blocks direct edits',async()=>{
       await auth(coach); await assert.rejects(action('attendance','confirm',visits),/Save and verify/);
       await db.query('INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,$3)',[sid,pid,'present']);
@@ -82,9 +111,12 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       await action('attendance','confirm',visits);
       for(const q of ['UPDATE attendance SET status=\'late\'','DELETE FROM attendance',`INSERT INTO attendance(session_id,player_id,status) VALUES('${sid}','${id(21)}','present')`]) await assert.rejects(db.exec(q),/closed/);
       await auth(admin); await action('attendance','reopen');
-      const flags=(await db.query('SELECT callup_confirmed,attendance_confirmed,evaluation_confirmed FROM sessions')).rows[0];
+      const flags=(await db.query('SELECT callup_confirmed,attendance_confirmed,evaluation_confirmed FROM sessions WHERE id=$1',[sid])).rows[0];
       assert.deepEqual(flags,{callup_confirmed:true,attendance_confirmed:false,evaluation_confirmed:false});
       await auth(coach); await db.exec("UPDATE attendance SET status='late'");
+      await db.exec("UPDATE attendance SET status='unknown'");
+      await assert.rejects(action('attendance','confirm',[{...visits[0],status:'unknown'}]),/Save and verify/);
+      await db.exec("UPDATE attendance SET status='late'");
     });
     await t.test('global lock and evaluation/card workflow guards protect direct writes',async()=>{
       await db.exec(`RESET ROLE; UPDATE sessions SET globally_locked=true;`); await auth(coach);
@@ -95,6 +127,9 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       await auth(admin);await action('evaluation','reopen');
       await auth(coach);await db.query('INSERT INTO evaluations(session_id,player_id) VALUES($1,$2)',[sid,pid]);
       await assert.rejects(db.query('UPDATE evaluations SET session_id=$1',[id(99)]),/Cannot move/);
+      await assert.rejects(db.query('UPDATE evaluations SET player_id=$1',[id(99)]),/Cannot move/);
+      await assert.rejects(db.exec('UPDATE evaluations SET evaluated=true'),/atomic evaluation/);
+      await assert.rejects(db.query('INSERT INTO evaluations(session_id,player_id,evaluated) VALUES($1,$2,true)',[sid,id(99)]),/atomic evaluation/);
     });
     await t.test('viewer and anonymous callers cannot execute privileged operations or adapters',async()=>{
       await auth(viewer);await assert.rejects(action('attendance','confirm',visits),/permission denied/);
