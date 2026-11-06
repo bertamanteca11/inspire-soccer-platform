@@ -37,10 +37,10 @@ function Harness() {
   if(query.get('mode')==='home')return wrap(<HomePage role={role} nextSession={query.has('shell') ? contextSession : sportSessions[0]} selectedSession={query.has('shell') ? sportSessions[1] : sportSessions[0]} players={sportPlayers} evaluations={sportEvaluations.filter(e=>e.session_id===sportSessions[0].id)} attendance={[]} cardTotals={query.has('alerts') ? Array.from({length:11},(_,i)=>({player_id:'card-'+i,display_name:'Card player '+i,yellow_cards:20-i,red_cards:0,total_cards:20-i})) : []} setTab={setNavigation}/>,'Inicio','home');
   if(query.get('mode')==='callup')return wrap(<CallupPage role={role} session={{...contextSession,callup_confirmed:!query.has('draft-callup')}} reload={async()=>{}} setError={setError}/>,'Convocatoria','callup');
   if(query.get('mode')==='attendance')return wrap(<AttendancePage role={role} session={contextSession} players={sportPlayers} attendance={[]} reload={async()=>{}} setError={setError}/>,'Asistencia','attendance');
-  if (query.get('mode') === 'sessions') return historyId ? <><button onClick={() => setHistoryId('')}>Volver a sesiones</button><SummaryPage initialSessionId={historyId}/></> : <>
-    <p>Selección operativa: {selected?.name || 'ninguna'}</p>
+  if (query.get('mode') === 'sessions') return historyId ? <><button onClick={() => setHistoryId('')}>Volver a sesiones</button><SummaryPage initialSessionId={historyId}/></> : wrap(<>
+    <p hidden={query.has('shell')}>Selección operativa: {selected?.name || 'ninguna'}</p>
     <SessionsPage role={(query.get('role') || 'admin') as Role} selectedSession={selected} setSelectedSession={setSelected} reload={async () => {}} onViewHistory={setHistoryId}/>
-  </>;
+  </>,'Sesiones','sessions');
   return query.get('mode') === 'editor' || reviewAttendanceId ? <>
     {error && <p role="alert">{error}</p>}
     <AttendancePage role="admin" session={{ ...sessions.find(s => s.id === (reviewAttendanceId||sessionId))!, high_rating_limit: 6, callup_confirmed: true, attendance_confirmed: !!reviewAttendanceId }}

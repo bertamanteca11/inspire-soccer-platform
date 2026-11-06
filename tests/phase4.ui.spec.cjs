@@ -208,14 +208,39 @@ test('a failed verification read never confirms attendance after saving',async({
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
-const sessionCard=(page,name)=>page.locator('.card').filter({has:page.getByText(name,{exact:true})});
+const sessionCard=(page,name)=>page.locator('.session-card').filter({has:page.getByText(name,{exact:true})});
+test('compact session cards select directly and disclose secondary actions without mobile overflow',async({page})=>{
+  const state=await setup(page);await page.setViewportSize({width:390,height:844});
+  await page.goto('/phase4-test?mode=sessions&shell');
+  const name=fixture.sessions.find(s=>s.id===fixture.intendedIds[2]).name;
+  const card=sessionCard(page,name);
+  await expect(card.getByRole('button',{name:'Editar',exact:true})).toBeVisible();
+  await expect(card.getByRole('button',{name:'Archivar sesión',exact:true})).toBeHidden();
+  await card.getByRole('button',{name:'Seleccionar sesión: '+name,exact:true}).click();
+  await expect(card.getByRole('button',{pressed:true})).toBeVisible();
+  await expect(card.getByText('Seleccionada',{exact:true})).toBeVisible();
+  expect((await card.boundingBox()).height).toBeLessThan(190);
+  await page.screenshot({path:'.phase4-test-artifacts/sessions-390.png',fullPage:true});
+  await page.setViewportSize({width:320,height:740});
+  await card.locator('summary').focus();await page.keyboard.press('Enter');
+  await expect(card.getByRole('button',{name:'Ver registros históricos',exact:true})).toBeVisible();
+  await expect(card.getByRole('button',{name:'Archivar sesión',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.screenshot({path:'.phase4-test-artifacts/sessions-320-options.png',fullPage:true});
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+async function sessionOption(page,name,action){
+  const card=sessionCard(page,name);
+  if(!await card.locator('details').getAttribute('open').then(value=>value!==null))await card.locator('summary').click();
+  await card.getByRole('button',{name:action,exact:true}).click();
+}
 test('archive and explicit restore separate the catalogs, clear selection and preserve ratings and records',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test?mode=sessions');
   const name=fixture.sessions.find(s=>s.id===fixture.intendedIds[2]).name;
   await expect(page.getByText('Archivada',{exact:true})).toHaveCount(0);
   await sessionCard(page,name).getByRole('button',{name:'Seleccionar sesión'}).click();
   await expect(page.getByText('Selección operativa: '+name,{exact:true})).toBeVisible();
-  await sessionCard(page,name).getByRole('button',{name:'Archivar sesión',exact:true}).click();
+  await sessionOption(page,name,'Archivar sesión');
   expect(state.writes).toHaveLength(0);
   await page.getByRole('button',{name:'Confirmar archivo',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('archivada y verificada');
@@ -226,7 +251,7 @@ test('archive and explicit restore separate the catalogs, clear selection and pr
   await page.getByRole('button',{name:/^Archivadas /}).click();
   await expect(sessionCard(page,name)).toBeVisible();
   await expect(sessionCard(page,name).getByRole('button',{name:'Seleccionar sesión'})).toHaveCount(0);
-  await sessionCard(page,name).getByRole('button',{name:'Restaurar sesión',exact:true}).click();
+  await sessionOption(page,name,'Restaurar sesión');
   await expect(page.getByRole('button',{name:'Confirmar restauración',exact:true})).toBeDisabled();
   await page.getByLabel('Restaurar como').selectOption('completed');
   await page.getByRole('button',{name:'Confirmar restauración',exact:true}).click();
@@ -241,7 +266,7 @@ for(const [result,expected]of [['denied','permisos'],['zero','No se ha verificad
   test('archive '+result+' response never displays success',async({page})=>{
     const state=await setup(page,{archiveResult:result});await page.goto('/phase4-test?mode=sessions');
     const name=fixture.sessions.find(s=>s.id===fixture.intendedIds[2]).name;
-    await sessionCard(page,name).getByRole('button',{name:'Archivar sesión',exact:true}).click();
+    await sessionOption(page,name,'Archivar sesión');
     await page.getByRole('button',{name:'Confirmar archivo',exact:true}).click();
     await expect(page.getByRole('alert')).toContainText(expected);
     await expect(page.getByText('Sesión archivada y verificada correctamente.',{exact:false})).toHaveCount(0);
@@ -253,11 +278,11 @@ for(const [result,expected]of [['denied','permisos'],['zero','No se ha verificad
 test('archived session records remain accessible through the explicitly historical Summary detail',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test?mode=sessions');
   const name=fixture.sessions.find(s=>s.id===fixture.intendedIds[2]).name;
-  await sessionCard(page,name).getByRole('button',{name:'Archivar sesión',exact:true}).click();
+  await sessionOption(page,name,'Archivar sesión');
   await page.getByRole('button',{name:'Confirmar archivo',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('archivada y verificada');
   await page.getByRole('button',{name:/^Archivadas /}).click();
-  await sessionCard(page,name).getByRole('button',{name:'Ver registros históricos'}).click();
+  await sessionOption(page,name,'Ver registros históricos');
   await expect(page.getByText('Detalle histórico de una sesión.',{exact:false})).toBeVisible();
   await expect(page.getByText('1 sesiones · 1 registros de asistencia · 0 tarjetas en este ámbito.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Periodo y sesiones',exact:true}).click();
@@ -284,6 +309,7 @@ test('coach cannot invoke archive or restore controls',async({page})=>{
   await expect(page.getByRole('button',{name:'Archivar sesión',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:/^Archivadas /}).click();
   await expect(page.getByRole('button',{name:'Restaurar sesión',exact:true})).toHaveCount(0);
+  await page.locator('.session-options summary').click();
   await expect(page.getByRole('button',{name:'Ver registros históricos'})).toBeVisible();
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Archive, ChevronDown, History, Plus, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
-import { buildSessionLabel, translateSessionType, translateSessionStatus } from '../utils/formatters';
+import { buildSessionLabel, translateSessionStatus } from '../utils/formatters';
 import { Card, Modal, PageTitle } from '../components/ui';
 import { loadAllSessions } from '../lib/data';
 import { changeSessionArchiveStatus } from '../lib/sessionArchive';
@@ -84,20 +84,28 @@ export function SessionsPage({ role, reload, selectedSession, setSelectedSession
   const active = sessions.filter(isActiveSession), archived = sessions.filter(s => s.status === 'archived');
   const visible = view === 'active' ? active : archived;
   const other = sessions.filter(s => !isActiveSession(s) && s.status !== 'archived');
-  return <div className="stack">
-    <div className="row"><PageTitle title="Sesiones" subtitle="Actividad operativa y archivo histórico, separados."/>{canEdit && <button className="icon-btn big" aria-label="Crear sesión" disabled={busy} onClick={() => openEdit()}><Plus size={20}/></button>}</div>
+  return <div className="stack sessions-page">
+    <div className="row"><PageTitle title="Sesiones" subtitle="Entrenos, partidos y pruebas."/>{canEdit && <button className="icon-btn big" aria-label="Crear sesión" disabled={busy} onClick={() => openEdit()}><Plus size={20}/></button>}</div>
     <div className="segmented"><button className={view === 'active' ? 'selected' : ''} disabled={busy} onClick={() => setView('active')}>Activas ({active.length})</button><button className={view === 'archived' ? 'selected' : ''} disabled={busy} onClick={() => setView('archived')}>Archivadas ({archived.length})</button></div>
-    <p>{view === 'active' ? 'Las sesiones archivadas no se seleccionan para el trabajo diario.' : 'El archivo conserva asistencias, evaluaciones, convocatorias y demás registros. Consultar el historial no reactiva la sesión.'}</p>
-    <button className="secondary" disabled={busy || loading} onClick={() => void loadSessions()}>Actualizar sesiones</button>
+    <div className="sessions-toolbar"><span>{view === 'active' ? 'Selecciona una sesión para trabajar' : 'Consulta o restaura sesiones anteriores'}</span><button className="sessions-refresh" aria-label="Actualizar sesiones" disabled={busy || loading} onClick={() => void loadSessions()}><RefreshCw size={16}/><span>Actualizar</span></button></div>
     {message && <p role={message.error ? 'alert' : 'status'} className={message.error ? 'error' : 'success'}>{message.text}</p>}
-    {loading ? <Card><p role="status">Cargando sesiones…</p></Card> : !visible.length ? <Card><p>{view === 'active' ? 'No hay sesiones activas.' : 'No hay sesiones archivadas.'}</p></Card> : visible.map(s => <Card key={s.id} className={selectedSession?.id === s.id ? 'session-card current' : 'session-card'}>
-      <strong>{s.name}</strong><p>{buildSessionLabel(s)}</p><p>{translateSessionType(s.type)} · {translateSessionStatus(s.status)}</p><small>{s.id}</small>
-      <div className="row">
-        {isActiveSession(s) && <><button className="secondary" disabled={busy} onClick={() => { setSelectedSession(s); void reload(s.id).catch(error => setMessage({ text: String(error), error: true })); }}>Seleccionar sesión</button>{canEdit && <button className="chip" disabled={busy} onClick={() => openEdit(s)}>Editar</button>}</>}
-        {onViewHistory && <button className="secondary" disabled={busy} onClick={() => onViewHistory(s.id)}>Ver registros históricos</button>}
-        {canArchive && <button className="secondary" disabled={busy} onClick={() => { setArchiveDialog(s); setRestoreAs(''); setMessage(null); }}>{s.status === 'archived' ? 'Restaurar sesión' : 'Archivar sesión'}</button>}
-      </div>
-    </Card>)}
+    {loading ? <Card><p role="status">Cargando sesiones…</p></Card> : !visible.length ? <Card><p>{view === 'active' ? 'No hay sesiones activas.' : 'No hay sesiones archivadas.'}</p></Card> : visible.map(s => {
+      const current = selectedSession?.id === s.id;
+      const summary = <><span className={`session-icon ${s.type === 'training' || s.type === 'tryout' ? 'training' : 'match'}`} aria-hidden="true">{s.type === 'training' ? '🏃' : s.type === 'tryout' ? '🎯' : '⚽'}</span><span className="session-copy"><strong>{s.name}</strong><span className="session-meta">{buildSessionLabel(s)}</span><span className="session-badges"><span className={`session-status ${s.status}`}>{translateSessionStatus(s.status)}</span>{current && <span className="session-selected">Seleccionada</span>}</span></span></>;
+      return <Card key={s.id} className={current ? 'session-card current' : 'session-card'}>
+        <div className="session-main-row">
+          {isActiveSession(s) ? <button className="session-select" aria-label={`Seleccionar sesión: ${s.name}`} aria-pressed={current} disabled={busy} onClick={() => { setSelectedSession(s); void reload(s.id).catch(error => setMessage({ text: String(error), error: true })); }}>{summary}</button> : <div className="session-select">{summary}</div>}
+          {isActiveSession(s) && canEdit && <button className="chip session-edit" disabled={busy} onClick={() => openEdit(s)}>Editar</button>}
+        </div>
+        {(onViewHistory || canArchive) && <details className="session-options">
+          <summary>Más opciones <ChevronDown size={14}/></summary>
+          <div className="session-option-actions">
+            {onViewHistory && <button disabled={busy} onClick={() => onViewHistory(s.id)}><History size={16}/>Ver registros históricos</button>}
+            {canArchive && <button disabled={busy} onClick={() => { setArchiveDialog(s); setRestoreAs(''); setMessage(null); }}><Archive size={16}/>{s.status === 'archived' ? 'Restaurar sesión' : 'Archivar sesión'}</button>}
+          </div>
+        </details>}
+      </Card>;
+    })}
     {!!other.length && <Card><p role="alert">{other.length} sesiones con estado no operativo. Se conservan y pueden consultarse en el historial.</p>{other.map(s => <p key={s.id}>{s.name} · {translateSessionStatus(s.status)} {onViewHistory && <button onClick={() => onViewHistory(s.id)}>Ver registros históricos</button>}</p>)}</Card>}
     {archiveDialog && <Modal title={archiveDialog.status === 'archived' ? 'Restaurar sesión' : 'Archivar sesión'} onClose={() => { if (!busy) setArchiveDialog(null); }}>
       <p><strong>{archiveDialog.name}</strong> · {archiveDialog.session_date}</p><p>Sesión {archiveDialog.id}</p>
