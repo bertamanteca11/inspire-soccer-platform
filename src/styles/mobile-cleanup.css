@@ -3,6 +3,12 @@
 .home-dashboard .club-session-workflow { margin-bottom: 0; }
 .home-dashboard summary { cursor: pointer; padding: 10px 0; min-height: 44px; }
 .home-dashboard .top-row strong { min-width: 0; overflow-wrap: anywhere; }
+.home-discipline-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .875rem; }
+.home-discipline-line strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-discipline-line > span { flex-shrink: 0; white-space: nowrap; }
+.home-discipline-line .discipline-sanction { color: var(--danger); font-weight: 700; }
+.evaluation-criteria { padding-left: 20px; }
+.evaluation-criteria li { margin: 8px 0; }
 @media (max-width: 767px), (max-height: 499px) {
   .home-dashboard .hero-card { min-height: 0; padding: 16px; }
   .home-dashboard .hero-card h2 { font-size: 1.5rem; line-height: 1.15; margin-bottom: 6px; }

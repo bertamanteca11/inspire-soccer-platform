@@ -3,7 +3,7 @@ import { loadPerformanceData } from '../lib/performance';
 import { playerPerformanceAverages, eligibilityReason } from '../utils/evaluationEligibility';
 import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
-import { AlertTriangle, Trophy, Ban, ClipboardList, Shield, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Trophy, ClipboardList, Shield, ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
@@ -91,6 +91,14 @@ export function HomePage({
   }
 
   const activeTop = topMode === 'matches' ? topMatches : topTrainings;
+  const disciplineAlerts = new Map<string,{name:string;cards?:PlayerCardTotal;sanction:boolean}>();
+  for(const s of suspensions){
+    const key=s.player_id || 'suspension-'+s.id;
+    disciplineAlerts.set(key,{name:s.display_name,sanction:true});
+  }
+  for(const cards of cardWarnings){
+    disciplineAlerts.set(cards.player_id,{name:cards.display_name,cards,sanction:disciplineAlerts.get(cards.player_id)?.sanction || false});
+  }
 
   return (
     <div className="stack home-dashboard">
@@ -130,26 +138,16 @@ export function HomePage({
       {(cardWarnings.length > 0 || suspensions.length > 0) && (
         <Card>
           <div className="row">
-            <p className="kicker">Tarjetas históricas y sanciones activas</p>
+            <p className="kicker">Tarjetas y sanciones</p>
             <AlertTriangle size={18} />
           </div>
-          <p className="muted">Las tarjetas muestran el total histórico. La cuenta actual de acumulación y las sanciones cumplidas se consultan en Convocatoria.</p>
-
-          <ProgressiveAlerts items={[
-              ...suspensions.map((s: any) => ({ key: 'suspension-' + s.id, content:
-                <div className="suspension-item">
-                  <Ban size={16} />
-                  <strong>{s.display_name}</strong>
-                  <span>{s.matches_remaining} partido(s) sanción</span>
-                </div>
-              })),
-              ...cardWarnings.map((c: PlayerCardTotal) => ({ key: 'card-' + c.player_id, content:
-                <div className={Number(c.yellow_cards) >= 3 || Number(c.red_cards) > 0 ? 'card-warning-item danger' : 'card-warning-item'}>
-                  <strong>{c.display_name}</strong>
-                  <span>{c.yellow_cards} 🟨 {Number(c.red_cards) > 0 ? `· ${c.red_cards} 🟥` : ''}</span>
-                </div>
-              }))
-          ]}/>
+          <ProgressiveAlerts items={[...disciplineAlerts].map(([key,alert])=>({key,content:
+            <div className="home-discipline-line">
+              <strong title={alert.name}>{alert.name}</strong>
+              {alert.cards&&<span>{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
+              {alert.sanction&&<span className="discipline-sanction">Sanción</span>}
+            </div>
+          }))}/>
         </Card>
       )}
 

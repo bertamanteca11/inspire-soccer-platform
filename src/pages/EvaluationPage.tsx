@@ -534,8 +534,14 @@ export function EvaluationPage({
       <SessionHeading session={session}/>
       {cardReadError && <Card><p role="alert">No se pudieron verificar las tarjetas: {cardReadError}</p><button className="secondary" onClick={() => void loadCards()}>Reintentar lectura de tarjetas</button></Card>}
       {disciplineIssue && <p role="alert">{disciplineIssue}</p>}
-      <Card><details><summary>Criterios de evaluación</summary><p>Solo se evalúa a jugadores convocados y evaluables con asistencia deportiva registrada. Las nuevas evaluaciones operativas empiezan con 3 en las cuatro cualidades; las notas y N/A ya guardados se respetan. Las notas iniciales quedan pendientes hasta confirmar.</p>
-        <p>Se evalúan cuatro cualidades. La media usa solo las puntuaciones válidas de estas cuatro; N/A no suma ni divide. La quinta cualidad antigua se conserva únicamente en el historial.</p></details>
+      <Card><details><summary>Criterios de evaluación</summary><ul className="evaluation-criteria">
+        <li><strong>Jugadores:</strong> evalúa a los convocados y evaluables con asistencia deportiva registrada.</li>
+        <li><strong>Puntuación:</strong> valora las cuatro cualidades de la sesión del 1 al 5. En las evaluaciones nuevas se parte de 3; ajusta la nota según el rendimiento observado.</li>
+        <li><strong>Notas altas (4–5):</strong> máximo de {highLimit} jugadores por cualidad.</li>
+        <li><strong>Notas bajas (1–2):</strong> máximo de {lowLimit} jugadores por cualidad.</li>
+        <li><strong>N/A y media:</strong> marca N/A cuando no puedas valorar una cualidad. La media se calcula con las cualidades puntuadas; N/A no cuenta como cero ni entra en el divisor.</li>
+        <li><strong>Al terminar:</strong> revisa las notas y los comentarios y pulsa «Confirmar evaluación» para cerrar la evaluación de la sesión.</li>
+      </ul></details>
       </Card>
       {isAdmin && localLocked && !recordsOnlyCompleted && <Card>
         <p className="muted">Si este es un partido histórico sin puntuaciones, pulsa «Reabrir evaluación» para acceder a «Solo registros». Reabrir no borra comentarios, tarjetas, asistencia ni N/A.</p>

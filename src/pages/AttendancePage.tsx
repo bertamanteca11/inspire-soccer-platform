@@ -197,7 +197,6 @@ export function AttendancePage({
       {savedNotice && <div role="status" className="save-feedback success">{savedNotice}</div>}
       {rosterLoading && <p role="status">Cargando plantilla y convocatoria…</p>}
       {rosterError && <p role="alert">No se puede guardar sin verificar la plantilla: {rosterError}</p>}
-      <Card><p className="muted">«Sin registrar» no suma presencia ni ausencia. Revisa el estado de cada jugador, incluidos los no convocados. «Ausencia injustificada» y «Ausencia justificada» cuentan por separado. Las notas existentes se conservan al cambiar el estado.</p>{localLocked && isAdmin && <p className="muted">Para corregir una asistencia, pulsa «Reabrir asistencia», cambia el estado, guarda y vuelve a confirmar.</p>}</Card>
       {attendancePlayers.map((p: Player) => {
         const draft = drafts[p.id] || { status: '', notes: '' };
         const needs = attendanceNeedsExplanation.includes(draft.status);

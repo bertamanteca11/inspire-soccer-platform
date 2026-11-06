@@ -1,7 +1,7 @@
 const {test,expect}=require('@playwright/test');const fs=require('node:fs');const ts=require('typescript');
 require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,file);
 const fixture=require('./evaluation.fixture.ts');
-async function setup(page,{draft=false,denied=false,duplicateAttendance=false,slowConfirmation=false,alertCount=0,partialCallups=false,emptyCallups=false}={}){
+async function setup(page,{draft=false,denied=false,duplicateAttendance=false,slowConfirmation=false,alertCount=0,partialCallups=false,emptyCallups=false,mergeCardAlerts=false}={}){
   const writes=[],unexpected=[],errors=[];let evaluations=draft?[]:structuredClone(fixture.sportEvaluations);
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',async route=>{
@@ -34,7 +34,7 @@ async function setup(page,{draft=false,denied=false,duplicateAttendance=false,sl
       unexpected.push('write '+table);return route.abort();
     }
     const visits=duplicateAttendance?[...fixture.sportAttendance,{...fixture.sportAttendance[0],id:'different-attendance-id'}]:fixture.sportAttendance;
-    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:emptyCallups?[]:partialCallups?fixture.sportCallups.slice(0,1):fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],suspensions:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:Array.from({length:alertCount},(_,i)=>({id:'suspension-'+i,display_name:'Suspended player '+i,matches_remaining:20-i}))};
+    const tables={sessions:fixture.sportSessions,players:fixture.sportPlayers,callups:emptyCallups?[]:partialCallups?fixture.sportCallups.slice(0,1):fixture.sportCallups,attendance:visits,official_evaluations:evaluations,evaluations,cards:[],suspensions:[],injuries:[],session_standouts:fixture.sportStandouts,staff_flags:[],must_win_reviews:[],active_suspensions:Array.from({length:alertCount},(_,i)=>({id:'suspension-'+i,player_id:mergeCardAlerts&&i===0?'card-0':undefined,display_name:mergeCardAlerts&&i===0?'Card player 0':'Suspended player '+i,matches_remaining:20-i}))};
     if(!Object.hasOwn(tables,table)){unexpected.push(table);return route.abort();}
     let rows=[...tables[table]];
     for(const key of ['id','session_id','player_id']){const f=url.searchParams.get(key);if(f?.startsWith('eq.'))rows=rows.filter(r=>r[key]===f.slice(3));}
@@ -184,15 +184,18 @@ for(const role of ['admin','coach','viewer']) for(const width of [320,360,390]) 
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
-test('Home alerts expand 2 to 5 to 10 and beyond without losing source order or content',async({page})=>{
-  const state=await setup(page,{alertCount:3}); await page.setViewportSize({width:360,height:740}); await page.goto('/phase4-test?mode=home&shell=1&alerts=1');
+test('Home alerts combine cards and sanctions per player and expand without losing other players',async({page})=>{
+  const state=await setup(page,{alertCount:3,mergeCardAlerts:true}); await page.setViewportSize({width:320,height:740}); await page.goto('/phase4-test?mode=home&shell=1&alerts=1');
   const list=page.locator('.home-alert-list'); await expect(list.locator(':scope > div')).toHaveCount(2);
-  await expect(list).toContainText('Suspended player 0'); await expect(list).toContainText('Suspended player 1');
+  await expect(list).toContainText('Card player 0'); await expect(list).toContainText('Suspended player 1');
+  await expect(list.locator('.home-discipline-line').first()).toContainText('20 🟨');
+  await expect(list.locator('.home-discipline-line').first()).toContainText('Sanción');
   await page.getByRole('button',{name:'Ver 5 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(5);
   await page.getByRole('button',{name:'Ver 10 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(10);
-  await page.getByRole('button',{name:'Ver 14 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(14);
-  await expect(list.locator('strong')).toHaveText([...Array.from({length:3},(_,i)=>'Suspended player '+i),...Array.from({length:11},(_,i)=>'Card player '+i)]);
-  await expect(list).toContainText('20 partido(s) sanción');
+  await page.getByRole('button',{name:'Ver 13 avisos',exact:true}).click(); await expect(list.locator(':scope > div')).toHaveCount(13);
+  await expect(list.locator('strong')).toHaveText(['Card player 0','Suspended player 1','Suspended player 2',...Array.from({length:10},(_,i)=>'Card player '+(i+1))]);
+  await expect(list.locator('.discipline-sanction')).toHaveCount(3);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.getByRole('button',{name:'Mostrar solo 2'}).click(); await expect(list.locator(':scope > div')).toHaveCount(2);
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
