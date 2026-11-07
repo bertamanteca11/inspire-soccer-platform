@@ -144,6 +144,33 @@ test('private staff and membership restrictions against the exported schema and 
       await action('reopen_attendance');await action('reopen_callup');
       assert.equal((await workspace()).attendance[0].status,'present');
     }));
+    for (const [label,person] of [['Admin A',susan],['Admin B',sergi]]) {
+      await t.test(label+' gets the exact protected-flags error for a legacy direct update, while reviewed RPCs succeed',()=>isolated(async()=>{
+        await auth(person);
+        const callups=[{session_id:sid,player_id:id(20),status:'called_up',evaluable:true}];
+        await db.query("SELECT batch4_workflow_action($1,'callup','confirm',$2::jsonb,false,'[]'::jsonb)",[sid,JSON.stringify(callups)]);
+        await db.query("INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,'present')",[sid,id(20)]);
+        for(const patch of ['attendance_confirmed=true','draft_defaults_version=1']) {
+          await assert.rejects(db.query('UPDATE sessions SET '+patch+' WHERE id=$1',[sid]),error=>{
+            assert.equal(error.code,'42501');
+            assert.equal(error.message,'Use the reviewed workflow RPC; session flags and draft origin are protected');
+            return true;
+          });
+        }
+        assert.equal((await db.query('SELECT attendance_confirmed FROM sessions WHERE id=$1',[sid])).rows[0].attendance_confirmed,false);
+        const attendance=[{session_id:sid,player_id:id(20),status:'present',notes:null}];
+        await db.query("SELECT batch4_workflow_action($1,'attendance','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify(attendance)]);
+        const before=(await db.query('SELECT attendance_confirmed,draft_defaults_version FROM sessions WHERE id=$1',[sid])).rows[0];
+        assert.deepEqual(before,{attendance_confirmed:true,draft_defaults_version:null});
+        assert.equal((await db.query("SELECT batch4_workflow_access($1,'evaluation') AS allowed",[sid])).rows[0].allowed,true);
+        assert.equal((await db.query('SELECT count(*) AS n FROM evaluations WHERE session_id=$1',[sid])).rows[0].n,0);
+        const row=(await db.query(`INSERT INTO evaluations(session_id,player_id,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,na_fields)
+          VALUES($1,$2,3,3,3,3,3,'{"coachability":true}') RETURNING *`,[sid,id(20)])).rows[0];
+        await db.query("SELECT batch4_workflow_action($1,'evaluation','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify([row])]);
+        const after=(await db.query('SELECT attendance_confirmed,evaluation_confirmed,draft_defaults_version FROM sessions WHERE id=$1',[sid])).rows[0];
+        assert.deepEqual(after,{attendance_confirmed:true,evaluation_confirmed:true,draft_defaults_version:null});
+      }));
+    }
     await t.test('the approved Coach still evaluates players after Admin records callup and attendance',()=>isolated(async()=>{
       await auth(susan);
       const callups=[{session_id:sid,player_id:id(20),status:'called_up',evaluable:true}];

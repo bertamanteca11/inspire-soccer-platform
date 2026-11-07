@@ -119,6 +119,14 @@ function Platform({ role, previewRole = 'viewer', canAccessStaff = false }: { ro
   const isAdmin = role === 'admin';
   const isCoach = role === 'coach';
 
+  function navigate(nextTab: Tab) {
+    setTab(nextTab);
+    // Another device can confirm/reopen the same session while this app stays
+    // open. Read its current flags before mounting a workflow editor; never
+    // infer or repair confirmations from the presence of attendance rows.
+    if (['callup', 'attendance', 'evaluation'].includes(nextTab)) void load(selectedSession?.id);
+  }
+
   async function load(targetSessionId?: string) {
     const request = ++loadRequest.current;
     setLoadingData(true);
@@ -201,9 +209,9 @@ function Platform({ role, previewRole = 'viewer', canAccessStaff = false }: { ro
   }
 
   return (
-    <ApplicationShell role={role} canAccessStaff={canAccessStaff} tab={tab} setTab={setTab} title={headerTitle} selectedSessionLabel={selectedSession && ['home', 'sessions', 'callup', 'attendance', 'evaluation'].includes(tab) ? selectedSession.name : undefined} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
+    <ApplicationShell role={role} canAccessStaff={canAccessStaff} tab={tab} setTab={navigate} title={headerTitle} selectedSessionLabel={selectedSession && ['home', 'sessions', 'callup', 'attendance', 'evaluation'].includes(tab) ? selectedSession.name : undefined} error={error} onLogout={() => { void supabase.auth.signOut(); }}>
           {tab === 'staff' && canAccessStaff && <Suspense fallback={<Card><p role="status">Cargando staff…</p></Card>}><StaffPage canAccess={canAccessStaff} initialSessionId={selectedSession?.id}/></Suspense>}
-          {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={setTab} />}
+          {tab === 'home' && <HomePage role={role} nextSession={nextSession} selectedSession={selectedSession} players={players} attendance={attendance} evaluations={evaluations} cardTotals={cardTotals} setTab={navigate} />}
           {tab === 'players' && (isAdmin || isCoach) && <PlayersPage role={role} />}
           {tab === 'sessions' && (isAdmin || isCoach) && <SessionsPage role={role} reload={load} selectedSession={selectedSession} setSelectedSession={setSelectedSession} onArchiveChange={onArchiveChange} onViewHistory={id => { setSummarySessionId(id); setTab('summary'); }} />}
           {tab === 'callup' && selectedSession && (isAdmin || isCoach) && <CallupPage role={role} session={selectedSession} reload={load} setError={setError} />}
