@@ -143,7 +143,19 @@ test('team and player PDF download directly and CSV contains persisted scoped to
   await page.getByLabel('Ámbito').selectOption(fixture.players[0].id);await expect(page.getByRole('button',{name:'Descargar PDF',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Generar informe',exact:true}).click();download=page.waitForEvent('download');await page.getByRole('button',{name:'Descargar PDF',exact:true}).click();file=await download;
   expect(file.suggestedFilename()).toContain('Alex_eligible');expect(fs.readFileSync(await file.path()).subarray(0,4).toString()).toBe('%PDF');
-  expect((fs.readFileSync(await file.path(),'latin1').match(/\/Type \/Page\b/g)||[]).length).toBeGreaterThan(3);
+  const pdf=fs.readFileSync(await file.path(),'latin1');
+  expect((pdf.match(/\/Type \/Page\b/g)||[]).length).toBe(2);
+  expect(pdf).toContain('Lectura r');expect(pdf).toContain('Asistencia y compromiso');
+  expect(pdf).not.toContain('Trayectoria');
+  await expect(page.getByRole('heading',{name:'Puntos de seguimiento',exact:true})).toBeVisible();
+});
+
+for(const table of ['injuries','suspensions'])test('reports cannot export partial data when '+table+' cannot be read',async({page})=>{
+  const state=await setup(page,{mode:'reports',readDenied:table});
+  await page.getByRole('button',{name:'Generar informe',exact:true}).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Descargar PDF',exact:true})).toHaveCount(0);
+  expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);
 });
 
 test('rapid score clicks cannot insert duplicate evaluations or confirm an in-flight write',async({page})=>{
