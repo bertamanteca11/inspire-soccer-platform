@@ -39,7 +39,8 @@ test('attendance defaults are local, complete save persists untouched guests, re
   const present=page.getByRole('button',{name:'Presente',exact:true});
   await expect(present.nth(0)).toHaveAttribute('aria-pressed','true');
   await expect(present.nth(1)).toHaveAttribute('aria-pressed','true');
-  await expect(present.nth(2)).toHaveAttribute('aria-pressed','false');
+  await expect(present).toHaveCount(2);
+  await expect(page.getByText('Excluded',{exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Guarda');expect(state.writes).toEqual([]);
   await page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0).click();
@@ -73,8 +74,15 @@ test('Coach callups are read-only and historical gaps never default',async({page
   await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'Convocado',exact:true}).first()).toBeDisabled();expect(state.writes).toEqual([]);
 });
-test('historical attendance remains unregistered without writes',async({page})=>{
-  const state=await setup(page,{historical:true});await expect(page.getByText('Sin registrar',{exact:true})).toHaveCount(3);expect(state.writes).toEqual([]);
+test('open attendance defaults to present without a draft marker and saves only called participants',async({page})=>{
+  const state=await setup(page,{historical:true});
+  const present=page.getByRole('button',{name:'Presente',exact:true});
+  await expect(present).toHaveCount(2);
+  for(const button of await present.all())await expect(button).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByText('Sin registrar',{exact:true})).toHaveCount(0);expect(state.writes).toEqual([]);
+  await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('guardada');
+  expect(state.attendance.map(r=>[r.player_id,r.status])).toEqual([['p','present'],['g','present']]);
 });
 for(const kind of ['operational','historical'])test(`session creation marks only explicit operational origin: ${kind}`,async({page})=>{
   const state=await setup(page,{mode:'sessions'});

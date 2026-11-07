@@ -19,7 +19,7 @@ export function callupDraft(session: AppSession, player: Player, rows: (CallupCh
 export function operationalAttendanceDraft(session: AppSession, playerId: string, rows: Attendance[], called: boolean): AttendanceDraft {
   const matches = rows.filter(row => row.session_id === session.id && row.player_id === playerId);
   if (matches.length) return attendanceDraft(rows, session.id, playerId);
-  return { status: usesDraftDefaults(session) && session.callup_confirmed && !session.attendance_confirmed && called ? 'present' : '', notes: '' };
+  return { status: session.callup_confirmed && !session.attendance_confirmed && ['planned','completed'].includes(session.status) && called ? 'present' : '', notes: '' };
 }
 export function attendanceSnapshot(rows: { player_id: string; status: string; notes?: string | null }[]): string {
   return JSON.stringify(rows.map(row => ({ player_id: row.player_id, status: row.status, notes: row.notes || null })).sort((a,b) => a.player_id.localeCompare(b.player_id)));

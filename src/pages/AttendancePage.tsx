@@ -1,9 +1,8 @@
-import { operationalAttendanceDraft, attendanceSnapshot, usesDraftDefaults } from '../utils/workflowDrafts';
+import { operationalAttendanceDraft, attendanceSnapshot } from '../utils/workflowDrafts';
 import { workflowAction } from '../lib/workflows';
 import { workflowRows } from '../lib/workflowReads';
 import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
-import { attendanceDraft } from '../utils/attendanceDrafts';
 import { useEffect, useState } from 'react';
 import { CheckCircle2, RotateCcw, Save } from 'lucide-react';
 import { supabase } from '../supabase';
@@ -82,7 +81,7 @@ export function AttendancePage({
       const called = new Set<string>(callRows.filter(c => ['called_up','trial','guest_not_evaluable'].includes(c.status)).map(c => c.player_id));
       const savedIds = new Set(saved.map(row => row.player_id));
       const all = (playerRows.data || []) as Player[];
-      const list = all.filter(p => called.has(p.id) || savedIds.has(p.id) || ['active','injured','trial','guest'].includes(p.status));
+      const list = all.filter(p => called.has(p.id) || savedIds.has(p.id));
       if ([...called, ...savedIds].some(id => !all.some(p => p.id === id))) throw new Error('Plantilla incompleta. Recarga antes de guardar.');
       const initial: Record<string, { status: string; notes: string }> = {};
       for (const p of list) initial[p.id] = operationalAttendanceDraft(session, p.id, saved, called.has(p.id));
@@ -94,7 +93,7 @@ export function AttendancePage({
   const access = useWorkflowAccess(session.id, 'attendance', localLocked);
   const locked = localLocked || !['admin','coach'].includes(role) || !access.canEdit || draftSession !== session.id;
   const isAdmin = role === 'admin';
-  const savePlayers = attendancePlayers.filter(p => !usesDraftDefaults(session) || calledIds.has(p.id) || stored.some(row => row.player_id === p.id) || !!drafts[p.id]?.status);
+  const savePlayers = attendancePlayers;
   function selectedRows() {
     return savePlayers.map(p => ({ session_id: session.id, player_id: p.id, status: drafts[p.id]?.status || '', notes: drafts[p.id]?.notes || null }));
   }
