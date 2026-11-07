@@ -4,10 +4,11 @@ require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f
 const fixture=require('./final.fixture.ts');
 const html='<html lang="es"><body><div id="root"></div><script type="module">import R from "/@react-refresh";R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>t=>t;window.__vite_plugin_react_preamble_installed__=true;</script><script type="module" src="/tests/final.harness.tsx"></script></body></html>';
 
-async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false}={}){
+async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false,unmarkedEvaluation=false,failInitialDefaults=false,searchRoster=false}={}){
   const state={writes:[],unexpected:[],errors:[],pending:0};
   const data=structuredClone({players:fixture.players,sessions:fixture.sessions,callups:fixture.calls,attendance:fixture.visits,evaluations:newEvaluation?[]:fixture.evaluations,injuries:fixture.injuries,session_standouts:fixture.standouts,cards:[],suspensions:[],active_suspensions:[],player_card_totals:[],staff_flags:[],must_win_reviews:[],veo_matches:[],veo_player_match_stats:[],veo_player_links:[],veo_import_batches:[],veo_calculated_stats:[]});
   if(staleEvaluation)data.evaluations[0].tactical_discipline=1;
+  if(searchRoster){data.players[0].name='\u00c1lex Fern\u00e1ndez';data.players[0].nickname='El Mago';}
   if(longCareer)data.players[0].career_notes='Trayectoria histórica con detalles que deben conservarse en el informe. '.repeat(400);
   if(noEligible)data.callups=data.callups.map(row=>({...row,evaluable:false}));
   if(allEligible){data.callups=data.callups.map(row=>({...row,status:'called_up',evaluable:true}));data.attendance=data.sessions.flatMap(s=>data.players.map(p=>({id:s.id+'-'+p.id,session_id:s.id,player_id:p.id,status:'present'})));}
@@ -40,6 +41,7 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     if(table==='create_yellow_accumulation_suspensions'){state.writes.push({table});return route.fulfill({json:null});}
     if(table==='batch4_workflow_action'){
       const body=req.postDataJSON();state.writes.push({table,body});
+      if(unmarkedEvaluation&&body.p_workflow==='evaluation'&&body.p_action==='confirm'&&body.p_rows.some(row=>!row.id))return route.fulfill({status:409,json:{message:'Initial scores require marked new session'}});
       return route.fulfill({json:{id:body.p_session,[body.p_workflow+'_confirmed']:body.p_action==='confirm'}});
     }
     if(!url.pathname.includes('/rest/v1/')||!Object.hasOwn(data,table)&&table!=='official_evaluations'){
@@ -68,11 +70,16 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     }else if(table==='attendance'){
       changed=body.map((r,i)=>({...r,id:'saved-'+i}));data.attendance=changed;
     }else{
+      if(Array.isArray(body)){
+        if(failInitialDefaults)return route.fulfill({status:403,json:{message:'Initial defaults save denied'}});
+        changed=body.map((row,i)=>({id:'saved-'+state.writes.length+'-'+i,...row}));data[table].push(...changed);
+      }else{
       changed={id:'saved-'+state.writes.length,...(table==='evaluations'?{tactical_discipline:3,effort_commitment:3,decision_making:3,mentality_attitude:3,coachability:3}:{}),...body};data[table].push(changed);
+      }
     }
     return route.fulfill({json:changed||null});
   });
-  await page.goto(`/final-test?mode=${mode}&role=${role}${newEvaluation?'&new':''}${match?'&match':''}${highLimit!==undefined?'&high='+highLimit:''}${lowLimit!==undefined?'&low='+lowLimit:''}`);
+  await page.goto(`/final-test?mode=${mode}&role=${role}${newEvaluation?'&new':''}${unmarkedEvaluation?'&unmarked':''}${match?'&match':''}${highLimit!==undefined?'&high='+highLimit:''}${lowLimit!==undefined?'&low='+lowLimit:''}`);
   page.__final=state;return state;
 }
 test.afterEach(async({page})=>{if(page.__final){expect(page.__final.unexpected).toEqual([]);expect(page.__final.errors).toEqual([]);}});
@@ -171,6 +178,49 @@ test('explicit N/A overrides the initial 3 and is preserved while switching qual
   await page.getByLabel('Cualidad que estás evaluando').selectOption('0');
   await expect(page.getByRole('button',{name:'N/A',exact:true})).toHaveClass(/active/);
   expect(state.data.evaluations[0].na_fields.tactical_discipline).toBe(true);expect(state.data.evaluations[0].na_fields.effort_commitment).toBe(false);
+});
+
+test('an existing unmarked session shows 3 and explicitly saves its defaults before the installed confirmation RPC',async({page})=>{
+  const state=await setup(page,{mode:'evaluation',newEvaluation:true,unmarkedEvaluation:true,allEligible:true});
+  await expect(page.locator('.rating-player-row')).toHaveCount(5);
+  for(const button of await page.getByRole('button',{name:'3',exact:true}).all())await expect(button).toHaveClass(/active/);
+  expect(state.writes).toEqual([]);
+  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toBeVisible();
+  expect(state.writes.map(row=>row.table)).toEqual(['evaluations','batch4_workflow_action']);
+  expect(state.writes[0].body).toHaveLength(5);
+  expect(state.writes[1].body.p_rows).toHaveLength(5);
+  for(const row of state.writes[1].body.p_rows){expect(row.id).toBeTruthy();for(const field of ['tactical_discipline','effort_commitment','decision_making','mentality_attitude']){expect(row[field]).toBe(3);expect(row.na_fields[field]).toBe(false);}}
+});
+
+test('failed saving of initial 3s cannot confirm an unmarked evaluation',async({page})=>{
+  const state=await setup(page,{mode:'evaluation',newEvaluation:true,unmarkedEvaluation:true,failInitialDefaults:true});
+  await expect(page.getByRole('button',{name:'3',exact:true})).toHaveClass(/active/);
+  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Initial defaults save denied');
+  expect(state.writes.map(row=>row.table)).toEqual(['evaluations']);
+  await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toHaveCount(0);
+});
+
+test('team search matches full name, nickname and jersey without accents and preserves filtering across a player profile',async({page})=>{
+  await page.setViewportSize({width:320,height:844});
+  const state=await setup(page,{mode:'players',searchRoster:true});
+  const search=page.getByRole('searchbox',{name:'Buscar jugador'}),rows=page.locator('.player-list-row');
+  await expect(rows).toHaveCount(4);
+  for(const query of ['  ALEX   fernandez  ','magó','1']){
+    await search.fill(query);await expect(rows).toHaveCount(1);await expect(rows).toContainText('Alex eligible');
+  }
+  await search.fill('Sin coincidencias');await expect(rows).toHaveCount(0);
+  await expect(page.getByText('No hay jugadores que coincidan con la búsqueda.')).toBeVisible();
+  await search.fill('Eli sin');await expect(rows).toHaveCount(0);
+  await page.getByLabel('Mostrar jugadores de baja').check();await expect(rows).toHaveCount(1);
+  await rows.click();await expect(page.getByRole('heading',{name:'Eli sin asistencia',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'← Volver a jugadores',exact:true}).click();
+  await expect(search).toHaveValue('Eli sin');await expect(page.getByLabel('Mostrar jugadores de baja')).toBeChecked();await expect(rows).toHaveCount(1);
+  await search.fill('');await expect(rows).toHaveCount(5);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:'.phase4-test-artifacts/team-search-320.png',fullPage:true});
+  expect(state.writes).toEqual([]);
 });
 
 test('rating quotas disable a new high or low while allowing edits within an occupied band',async({page})=>{

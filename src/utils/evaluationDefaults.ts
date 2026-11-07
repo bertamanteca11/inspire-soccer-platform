@@ -1,10 +1,10 @@
 import type { AppSession } from './appTypes';
 import { newEvaluationDraft, isSportingActivity } from './evaluationEligibility';
 
-// Only prospectively marked operational sessions get unpersisted defaults.
-// Existing rows (including N/A), historical holes and confirmed sessions prevail.
+// Open operational editors start at 3 regardless of the session's creation date.
+// Stored decisions (including N/A) and confirmed-session gaps always prevail.
 export function usesEvaluationDefaults(session: AppSession): boolean {
-  return session.draft_defaults_version===1 && session.callup_confirmed===true
+  return session.callup_confirmed===true
     && session.attendance_confirmed===true && session.evaluation_confirmed===false
     && session.records_only_confirmed!==true && ['planned','completed'].includes(session.status)
     && isSportingActivity(session);

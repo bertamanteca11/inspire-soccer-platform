@@ -152,7 +152,9 @@ test('private staff and membership restrictions against the exported schema and 
       const attendance=[{session_id:sid,player_id:id(20),status:'present',notes:null}];
       await db.query("SELECT batch4_workflow_action($1,'attendance','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify(attendance)]);
       await auth(juli);
-      const row=(await db.query('INSERT INTO evaluations(session_id,player_id) VALUES($1,$2) RETURNING *',[sid,id(20)])).rows[0];
+      assert.equal((await db.query('SELECT draft_defaults_version FROM sessions WHERE id=$1',[sid])).rows[0].draft_defaults_version,null);
+      const row=(await db.query(`INSERT INTO evaluations(session_id,player_id,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,na_fields)
+        VALUES($1,$2,3,3,3,3,3,'{"coachability":true}') RETURNING *`,[sid,id(20)])).rows[0];
       await db.query("SELECT batch4_workflow_action($1,'evaluation','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify([row])]);
       const result=(await db.query('SELECT evaluated,total_score FROM evaluations WHERE session_id=$1',[sid])).rows[0];
       assert.equal(result.evaluated,true);assert.equal(Number(result.total_score),3);

@@ -53,15 +53,14 @@ test('editor only offers eligible participants and the four approved training qu
   await expect(page.getByRole('heading',{name:'D. Nivel competitivo',exact:true})).toBeVisible();
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
-test('missing evaluation is not defaulted or confirmed and explicit scoring excludes database defaults',async({page})=>{
+test('unmarked open evaluation starts at 3 locally and explicit scoring preserves the other initial 3s',async({page})=>{
   const state=await setup(page,{draft:true});await page.goto('/phase4-test?mode=evaluation&draft=new');
   await expect(page.locator('.rating-player-row')).toHaveCount(1);
-  await expect(page.getByRole('button',{name:'3',exact:true})).not.toHaveClass(/active/);
-  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
-  await expect(page.getByRole('alert').filter({hasText:'falta una evaluacion explicita'})).toBeVisible();expect(state.writes).toEqual([]);
+  await expect(page.getByRole('button',{name:'3',exact:true})).toHaveClass(/active/);expect(state.writes).toEqual([]);
   await page.getByRole('button',{name:'4',exact:true}).click();
   await expect(page.getByText('Cambios guardados correctamente',{exact:true})).toBeVisible();
   const saved=state.evaluations[0];expect(saved.evaluated).toBe(false);expect(saved.na_fields.coachability).toBe(true);expect(saved.na_fields.tactical_discipline).toBe(false);expect(saved.tactical_discipline).toBe(4);
+  for(const field of ['effort_commitment','decision_making','mentality_attitude']){expect(saved[field]).toBe(3);expect(saved.na_fields[field]).toBe(false);}
   expect(state.writes.every(w=>w.table==='evaluations')).toBe(true);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('Summary and Reports agree on eligible player average and exclude out-of-scope evaluations',async({page})=>{

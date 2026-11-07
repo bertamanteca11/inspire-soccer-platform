@@ -23,12 +23,13 @@ test('retired fifth quality never affects current averages, but its original rem
  assert.equal(evaluationTotal({...row,na_fields:{tactical_discipline:true}}),3);
  assert.notEqual(evaluationSnapshot([row]),evaluationSnapshot([{...row,coachability:5}]));assert.equal(row.coachability,1);
 });
-test('operational defaults are four unpersisted 3s, preserving saved N/A and historical gaps',()=>{
+test('open evaluations default to four unpersisted 3s with or without a marker, preserving saved N/A and closed gaps',()=>{
  const s={id:'s',name:'Session',type:'training',status:'planned',draft_defaults_version:1,callup_confirmed:true,attendance_confirmed:true,evaluation_confirmed:false};
  const row=evaluationEditorRow(s,'p');assert.equal(evaluationTotal(row),3);assert.equal(row.id,null);assert.equal(row.evaluated,false);assert.equal(row.na_fields.coachability,true);
  const saved={...row,id:'stored',tactical_discipline:5,na_fields:{...row.na_fields,tactical_discipline:true}};
  assert.equal(evaluationEditorRow(s,'p',saved),saved);assert.equal(saved.na_fields.tactical_discipline,true);
- for(const patch of [{draft_defaults_version:null},{evaluation_confirmed:true},{callup_confirmed:false},{attendance_confirmed:false},{status:'archived'},{records_only_confirmed:true}]){
+ assert.equal(evaluationTotal(evaluationEditorRow({...s,draft_defaults_version:null},'p')),3);
+ for(const patch of [{evaluation_confirmed:true},{callup_confirmed:false},{attendance_confirmed:false},{status:'archived'},{records_only_confirmed:true}]){
   assert.equal(usesEvaluationDefaults({...s,...patch}),false);assert.equal(evaluationEditorRow({...s,...patch},'p'),undefined);
  }
  assert.equal(reviewedEvaluationRows(s,[],['p']).length,1);assert.equal(reviewedEvaluationRows(s,[saved],['p'])[0],saved);

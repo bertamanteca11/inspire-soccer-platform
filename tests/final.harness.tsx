@@ -28,7 +28,7 @@ function Harness(){
   const interactive=q.has('interactive');
   function navigate(tab:Tab){if(interactive){const next=new URLSearchParams({interactive:'1',mode:tab,role});if(q.has('match'))next.set('match','1');location.search=next.toString();}}
   const [error,setError]=useState('');
-  const [session,setSession]=useState<AppSession>({...sessions[0],type:q.has('match')?'league_match':sessions[0].type,callup_confirmed:mode!=='callup',attendance_confirmed:!['attendance','callup'].includes(mode),draft_defaults_version:1,
+  const [session,setSession]=useState<AppSession>({...sessions[0],type:q.has('match')?'league_match':sessions[0].type,callup_confirmed:mode!=='callup',attendance_confirmed:!['attendance','callup'].includes(mode),draft_defaults_version:q.has('unmarked')?null:1,
     high_rating_limit:q.has('high')?Number(q.get('high')):sessions[0].high_rating_limit,low_rating_limit:q.has('low')?Number(q.get('low')):sessions[0].low_rating_limit});
   const [demoEvaluations,setDemoEvaluations]=useState<any[]|null>(null);
   useEffect(()=>{

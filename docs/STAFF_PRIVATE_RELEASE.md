@@ -6,8 +6,9 @@ y tarjetas, sin evaluaciones. La cuenta Coach que utiliza Juli conserva el
 trabajo con jugadores y no puede leer ni modificar staff. No se han recibido
 todavía los nuevos requisitos de VEO de Sergi.
 
-Estado: implementación y pruebas locales completas; pendiente de instalación
-manual del SQL y comprobación de su resultado antes de publicar el frontend.
+Estado: Berta ha instalado el SQL y compartido `all_ok: true` el 7 de noviembre
+de 2026. Comprobados los permisos y la instalación; frontend preparado para
+publicación junto con los ajustes de evaluación inicial y búsqueda de jugadores.
 
 ## Configuración de cuentas
 
@@ -110,6 +111,17 @@ los componentes reales con respuestas aisladas; no escriben en Supabase.
 Validación del 6 de noviembre de 2026: compilación correcta, 154 pruebas de
 regresión, 93 pruebas de navegador y 15 comprobaciones con PostgreSQL 17 local,
 incluida concurrencia real entre dos conexiones. Todos los resultados correctos.
+
+Actualización del 7 de noviembre: 158 pruebas de regresión correctas, 97 casos
+de interfaz verificados y dos comprobaciones adicionales de evaluación sin
+marcador. La repetición opcional con PostgreSQL nativo no pudo arrancar porque
+Docker no estaba iniciado; las pruebas de base de datos de esta revisión se
+ejecutaron con PGlite y el SQL instalado tiene el `all_ok: true` compartido por Berta.
+
+En evaluaciones abiertas sin marcador, las cuatro notas iniciales son 3. Al
+confirmar, el cliente inserta únicamente los registros que faltan y verifica de
+nuevo la lectura antes de llamar al RPC existente. Los registros guardados y N/A
+prevalecen. No requiere otra migración ni altera los límites de notas altas/bajas.
 
 Cambios futuros de integrantes de la lista de acceso se realizan en SQL Editor,
 con identificadores comprobados. La app no ofrece un editor de permisos y Coach

@@ -495,7 +495,28 @@ export function EvaluationPage({
         ? latest.map(row=>row.id===savedComment.id?{...row,comment:savedComment.comment}:row)
         : [...latest,{...evaluationEditorRow(session,player.id),id:savedComment.id,comment:savedComment.comment}];
       if (evaluationSnapshot(finalRows) !== evaluationSnapshot(expectedFinal)) throw new Error('Las evaluaciones cambiaron durante la confirmación. Recarga y revisa de nuevo.');
-      await workflowAction(session.id, 'evaluation', 'confirm', reviewedEvaluationRows(session,finalRows,eligibleNow.map(p=>p.id)));
+      let confirmationRows = reviewedEvaluationRows(session,finalRows,eligibleNow.map(p=>p.id));
+      // The installed RPC only creates initial rows atomically for marked new
+      // sessions. For existing sessions, explicitly save the reviewed 3s first;
+      // insert-only writes cannot overwrite another coach's saved decisions.
+      const pendingDefaults = confirmationRows.filter(row => !row.id);
+      if (session.draft_defaults_version !== 1 && pendingDefaults.length) {
+        const { data, error } = await supabase.from('evaluations').insert(pendingDefaults.map(row => ({
+          session_id: session.id, player_id: row.player_id, coachability: 3,
+          not_applicable: false, ...newEvaluationDraft(true),
+        }))).select('*');
+        if (error) throw new Error(cleanDbError(error.message));
+        if (!Array.isArray(data) || data.length !== pendingDefaults.length || pendingDefaults.some(row =>
+          data.filter(saved => saved.player_id === row.player_id && saved.session_id === session.id && saved.id).length !== 1)) {
+          throw new Error('No se han podido verificar las notas iniciales guardadas. Recarga antes de confirmar.');
+        }
+        const expected = [...finalRows, ...pendingDefaults.map(row => ({...row,id:data.find(saved => saved.player_id === row.player_id)!.id}))];
+        const saved = await readPerformancePages<Evaluation>((a,b)=>supabase.from('evaluations').select('*').eq('session_id',session.id).order('id').range(a,b));
+        if (evaluationSnapshot(saved) !== evaluationSnapshot(expected)) throw new Error('Las evaluaciones cambiaron durante el guardado. Recarga antes de confirmar.');
+        setLocalEvaluations(saved);
+        confirmationRows = saved;
+      }
+      await workflowAction(session.id, 'evaluation', 'confirm', confirmationRows);
       setLocalLocked(true);
       if(moveToNextOpenSession)await moveToNextOpenSession();else await reload(session.id);
     } catch(failure){setError(String(failure));}
