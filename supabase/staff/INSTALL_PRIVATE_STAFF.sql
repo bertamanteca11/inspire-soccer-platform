@@ -15,7 +15,7 @@ DO $$ BEGIN
     IF (SELECT count(*) FROM public.profiles WHERE role::text='coach')<>1 THEN
       RAISE EXCEPTION 'Debe haber una única cuenta Coach. Si hay varias, consulta staff_access_accounts_read_only.sql e indica solo el UUID de Juli al principio de este archivo';
     END IF;
-    UPDATE staff_access_setup SET coach_user_id=(SELECT id FROM public.profiles WHERE role::text='coach');
+    UPDATE staff_access_setup SET coach_user_id=(SELECT id FROM public.profiles WHERE role::text='coach') WHERE coach_user_id IS NULL;
   END IF;
   IF NOT EXISTS(SELECT 1 FROM public.profiles p JOIN staff_access_setup s ON s.coach_user_id=p.id WHERE p.role::text='coach') THEN
     RAISE EXCEPTION 'El identificador elegido no corresponde a una cuenta Coach existente';
@@ -273,7 +273,7 @@ BEGIN
     END IF;
     UPDATE public.private_staff_suspensions SET served_at=clock_timestamp(),served_by=auth.uid() WHERE id=sanction.id;
   ELSE RAISE EXCEPTION 'Acción desconocida'; END IF;
-  UPDATE public.private_staff_control SET revision=revision+1;
+  UPDATE public.private_staff_control SET revision=revision+1 WHERE singleton = true;
   RETURN public.private_staff_workspace(p_session);
 END $$;
 REVOKE ALL ON FUNCTION public.private_staff_workspace(uuid),public.private_staff_action(uuid,text,jsonb,bigint) FROM PUBLIC,anon,authenticated;

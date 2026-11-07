@@ -10,6 +10,35 @@ Estado: Berta ha instalado el SQL y compartido `all_ok: true` el 7 de noviembre
 de 2026. Comprobados los permisos y la instalación; frontend preparado para
 publicación junto con los ajustes de evaluación inicial y búsqueda de jugadores.
 
+## Corrección del guardado: UPDATE requires a WHERE clause (7/11/2026)
+
+Si Staff ya está instalado y aparece este error al añadir un miembro, ejecutar
+**solo `supabase/staff/FIX_STAFF_SAVE_WHERE.sql` completo en SQL Editor como
+`postgres`**. No volver a ejecutar el instalador. El resultado debe mostrar
+`staff_save_patch.all_ok: true`. Después pulsar «Actualizar staff» y volver a
+añadir el miembro.
+
+La causa es el incremento de `private_staff_control.revision` sin predicado al
+final de `private_staff_action`. [pg-safeupdate](https://github.com/eradman/pg-safeupdate)
+rechaza un UPDATE sin WHERE, aunque la tabla solo permita una fila. La
+transacción del RPC revierte también el alta que lo precede. El filtro
+`WHERE singleton = true` selecciona explícitamente esa fila; no se desactiva
+la protección ni se modifican permisos.
+
+El parche sustituye exclusivamente esa sentencia en la definición instalada,
+conserva el resto del código, propietario, grants y configuración de seguridad,
+y puede ejecutarse de nuevo sin cambiar datos. No ejecuta acciones de staff,
+no incrementa contadores, no modifica nombres ni registros deportivos. El
+instalador para nuevas instalaciones y el diagnóstico incorporan la corrección.
+
+Las pruebas de regresión verifican los predicados de los UPDATE, la actualización
+de una definición antigua, idempotencia, conservación de datos y permisos,
+guardado de miembros e incremento de revisión, y denegación para Coach. La
+base aislada PGlite no carga la extensión pg-safeupdate; la regla de sintaxis
+se comprueba explícitamente para evitar que esa diferencia vuelva a ocultar
+un UPDATE sin filtro. Docker no está disponible para repetirlo con la extensión
+nativa en esta máquina. No es necesario modificar ni desplegar el frontend.
+
 ## Configuración de cuentas
 
 La instalación autoriza los identificadores de los perfiles Admin actuales y

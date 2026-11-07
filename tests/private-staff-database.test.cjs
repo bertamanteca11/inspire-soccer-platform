@@ -5,6 +5,12 @@ const {createReleaseDatabase}=require('./helpers/releaseDatabase.cjs');
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const read=f=>fs.readFileSync(f,'utf8');
 
+test('staff UPDATE statements have explicit predicates required by pg-safeupdate',()=>{
+  const statements=[...read('supabase/staff/INSTALL_PRIVATE_STAFF.sql').matchAll(/\bUPDATE\s+(?:public\.)?(private_staff_\w+|staff_access_setup)\s+SET\b[^;]*;/gi)];
+  assert(statements.some(match=>match[1]==='private_staff_control'));
+  for(const [statement] of statements)assert.match(statement,/\bWHERE\b/i,statement);
+});
+
 test('private staff and membership restrictions against the exported schema and synthetic identities',async t=>{
   const db=await createReleaseDatabase();const susan=id(1),sergi=id(2),juli=id(3),outsider=id(4),sid=id(10),otherSid=id(11);
   const rawQuery=db.query.bind(db);let isolate=false;
@@ -102,6 +108,40 @@ test('private staff and membership restrictions against the exported schema and 
     await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[outsider]);
     await auth(susan);let initial=await action('add_member',{name:'Technical staff fixture',job:'Entrenador'});const member=initial.members[0].id;
     const called={rows:[{staff_id:member,status:'called_up'}]};
+    await t.test('the staff hotfix patches only the legacy counter predicate, preserves data and security, and can run twice',async()=>{
+      await privileged();
+      const signature="'public.private_staff_action(uuid,text,jsonb,bigint)'::regprocedure";
+      const metadata=async()=>(await db.query('SELECT proowner,proacl,prosecdef,proconfig FROM pg_proc WHERE oid='+signature)).rows[0];
+      const definition=async()=>(await db.query('SELECT pg_get_functiondef('+signature+') AS body')).rows[0].body;
+      const tables=['private_staff_control','private_staff_members','private_staff_workflows','private_staff_callups','private_staff_attendance','private_staff_cards','private_staff_suspensions','app_access_members','profiles','sessions','players','callups','attendance','evaluations','cards','suspensions'];
+      const snapshot=async()=>Promise.all(tables.map(async table=>({table,rows:(await db.query('SELECT to_jsonb(t) AS row FROM '+table+' t ORDER BY to_jsonb(t)::text')).rows})));
+      const original=await definition(),beforeSecurity=await metadata(),beforeData=await snapshot();
+      const scoped='UPDATE public.private_staff_control SET revision=revision+1 WHERE singleton = true;';
+      const legacy='UPDATE public.private_staff_control SET revision=revision+1;';
+      assert(original.includes(scoped));
+      await db.exec(original.replace(scoped,legacy));
+      assert((await definition()).includes(legacy));
+      const oldCheck=(await db.query(read('diagnostics/private_staff_post_install_check.sql'))).rows[0].private_staff_check;
+      assert.equal(oldCheck.checks.staff_revision_update_scoped,false);
+      assert.equal(oldCheck.all_ok,false);
+      for(let n=0;n<2;n++){
+        await db.exec(read('supabase/staff/FIX_STAFF_SAVE_WHERE.sql'));
+        assert.equal(await definition(),original);
+        assert.deepEqual(await metadata(),beforeSecurity);
+        assert.deepEqual(await snapshot(),beforeData);
+      }
+      const patchedCheck=(await db.query(read('diagnostics/private_staff_post_install_check.sql'))).rows[0].private_staff_check;
+      assert.deepEqual(patchedCheck.checks,{...oldCheck.checks,staff_revision_update_scoped:true});
+    });
+    await t.test('saving a member increments the singleton revision exactly once after the hotfix',()=>isolated(async()=>{
+      await auth(susan);const before=await workspace();
+      const after=await action('add_member',{name:'Hotfix synthetic member'});
+      assert.equal(after.revision,before.revision+1);
+      assert.equal(after.members.length,before.members.length+1);
+      assert(after.members.some(m=>m.name==='Hotfix synthetic member'));
+      await auth(juli);await assert.rejects(action('add_member',{name:'Denied'},after.revision),/denegado/);
+      await auth(susan);assert.equal((await workspace()).revision,after.revision);
+    }));
     await t.test('approved Admin and single Coach accounts enter; unapproved accounts stay blocked',()=>isolated(async()=>{
       for(const [person,allowed,privateStaff]of [[susan,true,true],[sergi,true,true],[juli,true,false],[outsider,false,false]]){
         await auth(person);const result=(await db.query('SELECT app_access() AS data')).rows[0].data;
