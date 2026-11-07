@@ -278,6 +278,33 @@ test('private staff and membership restrictions against the exported schema and 
       await assert.rejects(action('save_attendance',{rows:[{staff_id:member,status:'present'}]},old),/han cambiado/);
       assert.equal((await workspace()).attendance[0].notes,'Traffic');
     }));
+    await t.test('non-called staff can save a justified absence with a reason without changing callups; blank reasons roll back',()=>isolated(async()=>{
+      await auth(susan);const directory=await action('add_member',{name:'Physio with earlier commitment',job:'Fisio'},undefined,null);
+      const physio=directory.members.find(m=>m.name==='Physio with earlier commitment');
+      const rows=[{staff_id:member,status:'called_up'},{staff_id:physio.id,status:'not_called'}];
+      await action('confirm_callup',{rows});
+      await assert.rejects(action('confirm_attendance',{rows:[{staff_id:member,status:'present'},{staff_id:physio.id,status:'justified_absence',notes:'   '}]}),/check constraint/);
+      assert.equal((await workspace()).attendance.length,0);
+      const visits=[{staff_id:member,status:'present'},{staff_id:physio.id,status:'justified_absence',notes:'Previous commitment agreed before joining.'}];
+      const saved=await action('save_attendance',{rows:visits});
+      assert.equal(saved.attendance.find(a=>a.staff_id===physio.id).notes,visits[1].notes);
+      await action('confirm_attendance',{rows:visits});await action('reopen_attendance');
+      const reopened=await workspace();assert.equal(reopened.attendance.find(a=>a.staff_id===physio.id).status,'justified_absence');
+      assert.deepEqual(reopened.callups.map(c=>({staff_id:c.staff_id,status:c.status})).sort((a,b)=>a.staff_id.localeCompare(b.staff_id)),rows.sort((a,b)=>a.staff_id.localeCompare(b.staff_id)));
+      assert.equal(reopened.attendance.find(a=>a.staff_id===physio.id).notes,visits[1].notes);
+    }));
+    await t.test('unselected non-called staff have no attendance row, and a fully non-called roster supports explicit absence records',()=>isolated(async()=>{
+      await auth(susan);const directory=await action('add_member',{name:'Optional physio'},undefined,null);
+      const physio=directory.members.find(m=>m.name==='Optional physio');
+      await action('confirm_callup',{rows:[{staff_id:member,status:'called_up'},{staff_id:physio.id,status:'not_called'}]});
+      let data=await action('confirm_attendance',{rows:[{staff_id:member,status:'present'}]});
+      assert(!data.attendance.some(a=>a.staff_id===physio.id));
+      await action('reopen_attendance');await action('reopen_callup');
+      await action('confirm_callup',{rows:[{staff_id:member,status:'not_called'},{staff_id:physio.id,status:'not_called'}]});
+      data=await action('confirm_attendance',{rows:[{staff_id:physio.id,status:'justified_absence',notes:'Prior commitment.'}]});
+      assert.equal(data.attendance.find(a=>a.staff_id===physio.id).status,'justified_absence');
+      assert.equal(data.workflow.attendance_confirmed,true);
+    }));
     await t.test('five yellows create one sanction; serving it resets accumulation and retains history',()=>isolated(async()=>{
       await auth(susan);await action('confirm_callup',called);
       for(let i=0;i<5;i++)await action('add_card',{staff_id:member,type:'yellow',reason:'Fixture '+i});

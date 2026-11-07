@@ -71,7 +71,26 @@ Mensaje para Susan:
 > session. This is the general staff list. To record a call-up, attendance or a
 > card, open that section and select the relevant session.
 
-## Cuentas autorizadas
+## Ausencias justificadas de miembros no convocados
+
+En **Staff → Asistencia**, después de seleccionar y confirmar la convocatoria
+de la sesión, aparecen los convocados y los demás miembros activos o con
+registros previos. Los convocados conservan el valor inicial Presente. Los no
+convocados sin asistencia previa quedan sin selección y su registro es opcional.
+
+Para justificar un compromiso anterior a la incorporación, elegir **Ausencia
+justificada**, escribir el motivo y guardar o confirmar la asistencia. No hace
+falta cambiar la convocatoria. Dejar un no convocado sin selección no crea una
+presencia ni una ausencia. Los registros guardados y sus comentarios se conservan,
+incluidos los de miembros inactivos. Si la asistencia está cerrada, un Admin debe
+reabrirla primero. Staff sigue siendo privado para Admin.
+
+Esta mejora utiliza el RPC y las validaciones existentes: no requiere SQL ni
+cambios de permisos. Las pruebas de interfaz y base de datos comprueban el motivo
+obligatorio, persistencia al recargar/reabrir, ausencia de registros automáticos
+para los no seleccionados y sesiones con todos los miembros no convocados.
+
+## Lista de cuentas aprobadas
 
 La instalación autoriza los identificadores de los perfiles Admin actuales y
 una sola cuenta Coach. Si hay un único perfil Coach, se detecta automáticamente;

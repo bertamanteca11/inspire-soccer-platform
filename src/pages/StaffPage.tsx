@@ -70,7 +70,7 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
   const members = workspace?.members || [];
   const roster = members.filter(m => m.active || workspace?.callups.some(c => c.staff_id === m.id) || workspace?.attendance.some(a => a.staff_id === m.id));
   const called = roster.filter(m => workspace?.callups.some(c => c.staff_id === m.id && c.status === 'called_up'));
-  const visits = roster.filter(m => called.some(c => c.id === m.id) || workspace?.attendance.some(a => a.staff_id === m.id));
+  const visits = [...called,...roster.filter(m => !called.some(c => c.id === m.id))];
   const activeSanctions = workspace?.suspensions.filter(s => !s.served_at) || [];
   const callupWarnings = session && ['league_match','friendly_match','scrimmage'].includes(session.type)
     ? roster.filter(m => callups[m.id] === 'called_up' && activeSanctions.some(s => s.staff_id === m.id)) : [];
@@ -91,8 +91,14 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
     await act(confirm ? 'confirm_callup' : 'save_callup',{rows:roster.map(m => ({staff_id:m.id,status:callups[m.id]})),acknowledge_sanctions:acknowledged},confirm ? 'Convocatoria del staff confirmada.' : 'Convocatoria del staff guardada.');
   }
   async function saveAttendance(confirm: boolean) {
-    if (!visits.length || visits.some(m => !attendance[m.id]?.status || attendance[m.id].status !== 'present' && !attendance[m.id].notes.trim())) { setError('Revisa la asistencia de cada miembro y explica los retrasos o ausencias.'); return; }
-    await act(confirm ? 'confirm_attendance' : 'save_attendance',{rows:visits.map(m => ({staff_id:m.id,...attendance[m.id]}))},confirm ? 'Asistencia del staff confirmada.' : 'Asistencia del staff guardada.');
+    const selected = visits.filter(m => attendance[m.id]?.status);
+    if (!selected.length || called.some(m => !attendance[m.id]?.status)
+      || workspace?.attendance.some(a => !attendance[a.staff_id]?.status)
+      || visits.some(m => !attendance[m.id]?.status && attendance[m.id]?.notes.trim())
+      || selected.some(m => attendance[m.id].status !== 'present' && !attendance[m.id].notes.trim())) {
+      setError('Revisa la asistencia de los convocados y explica los retrasos o ausencias que quieras registrar.'); return;
+    }
+    await act(confirm ? 'confirm_attendance' : 'save_attendance',{rows:selected.map(m => ({staff_id:m.id,...attendance[m.id]}))},confirm ? 'Asistencia del staff confirmada.' : 'Asistencia del staff guardada.');
   }
   return <div className="stack private-staff-page">
     <PageTitle title="Staff" subtitle="Miembros del equipo técnico y gestión por sesión."/>
@@ -116,8 +122,19 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
       </Card>}
       {section==='attendance' && <Card><div className="staff-section-heading"><h3>Asistencia del staff</h3><span>{workspace.workflow.attendance_confirmed ? 'Confirmada' : 'Borrador'}</span></div>
         {!workspace.workflow.callup_confirmed && <p>Confirma primero la convocatoria del staff.</p>}
-        {workspace.workflow.callup_confirmed && !visits.length && <p>No hay miembros convocados para esta sesión.</p>}
-        {visits.map(m => <div className="staff-attendance-person" key={m.id}><label><strong>{m.name}</strong><select aria-label={`Asistencia de ${m.name}`} disabled={attendanceLocked} value={attendance[m.id]?.status || ''} onChange={e => setAttendance({...attendance,[m.id]:{notes:attendance[m.id]?.notes || '',status:e.target.value}})}><option value="">Seleccionar asistencia</option>{attendanceOptions.map(value => <option key={value} value={value}>{translateAttendance(value)}</option>)}</select></label><label className="staff-note">{attendance[m.id]?.status && attendance[m.id].status!=='present' ? 'Motivo (obligatorio)' : 'Notas'}<textarea aria-label={`Notas de asistencia de ${m.name}`} maxLength={4000} disabled={attendanceLocked} value={attendance[m.id]?.notes || ''} onChange={e => setAttendance({...attendance,[m.id]:{status:attendance[m.id]?.status || '',notes:e.target.value}})}/></label></div>)}
+        {workspace.workflow.callup_confirmed && !called.length && <p>No hay miembros convocados para esta sesión. Puedes registrar una ausencia justificada de los demás miembros.</p>}
+        <p className="muted">También puedes registrar a los no convocados: selecciona «Ausencia justificada» y explica el compromiso previo. Deja sin selección a quien no quieras añadir un registro.</p>
+        {visits.map(m => {
+          const isCalled = called.some(c => c.id === m.id);
+          const saved = workspace.attendance.some(a => a.staff_id === m.id);
+          const callupStatus = workspace.callups.find(c => c.staff_id === m.id)?.status;
+          return <div className="staff-attendance-person" key={m.id}><label><strong>{m.name}</strong>
+            <small className="muted">{isCalled ? 'Convocado' : callupOptions.find(([value]) => value === callupStatus)?.[1] || 'Sin convocatoria registrada'}{!isCalled && !saved ? ' · Registro opcional' : ''}</small>
+            <select aria-label={`Asistencia de ${m.name}`} disabled={attendanceLocked} value={attendance[m.id]?.status || ''} onChange={e => setAttendance({...attendance,[m.id]:{notes:attendance[m.id]?.notes || '',status:e.target.value}})}>
+              <option value="" disabled={isCalled || saved}>{isCalled || saved ? 'Seleccionar asistencia' : 'Sin selección (opcional)'}</option>
+              {attendanceOptions.map(value => <option key={value} value={value}>{translateAttendance(value)}</option>)}
+            </select></label><label className="staff-note">{attendance[m.id]?.status && attendance[m.id].status!=='present' ? 'Motivo (obligatorio)' : 'Notas'}<textarea aria-label={`Notas de asistencia de ${m.name}`} maxLength={4000} disabled={attendanceLocked || !attendance[m.id]?.status} value={attendance[m.id]?.notes || ''} onChange={e => setAttendance({...attendance,[m.id]:{status:attendance[m.id]?.status || '',notes:e.target.value}})}/></label></div>;
+        })}
         {!workspace.workflow.attendance_confirmed ? <div className="staff-actions"><button className="secondary" disabled={attendanceLocked || !visits.length} onClick={() => void saveAttendance(false)}>Guardar asistencia del staff</button><button className="primary" disabled={attendanceLocked || !visits.length} onClick={() => void saveAttendance(true)}>Confirmar asistencia del staff</button></div> : <button className="secondary" disabled={busy || readOnly} onClick={() => void act('reopen_attendance',{},'Asistencia del staff reabierta.')}>Reabrir asistencia del staff</button>}
       </Card>}
       {section==='cards' && <>
