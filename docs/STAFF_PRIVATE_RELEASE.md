@@ -38,6 +38,11 @@ y sus permisos internos, y retira la ejecución directa de PUBLIC, anon y
 authenticated. No la ejecuta ni recalcula sanciones históricas. Las sanciones
 de la aplicación se gestionan mediante los RPC revisados de Batch 4.
 
+Las vistas heredadas `session_evaluation_summary`, `player_overview` y
+`active_player_injuries` conservan sus consultas y pasan a `security_invoker=true`
+para aplicar los permisos y RLS de quien consulta. Se retira su acceso anónimo
+y se concede a authenticated únicamente SELECT.
+
 ## Orden de publicación
 
 1. Abrir `supabase/staff/INSTALL_PRIVATE_STAFF.sql` y ejecutarlo completo en
@@ -73,8 +78,10 @@ permitirían distinguir quién realizó cada cambio en el futuro.
   técnico en Miembros. Añadir un miembro no le crea una cuenta ni le da acceso.
 - Elegir explícitamente la convocatoria y confirmarla. En partidos aparece un
   aviso si un convocado tiene sanción activa y se exige revisar el aviso.
-- En Asistencia, registrar cada estado; retrasos y ausencias requieren motivo.
-  Guardar o confirmar nunca presupone que alguien asistió.
+- En Asistencia, los convocados sin registro guardado comienzan en Presente
+  mientras la asistencia está abierta. Revisar las excepciones; retrasos y
+  ausencias requieren motivo. Los borradores solo se guardan al guardar o
+  confirmar; los estados existentes se conservan al reabrir.
 - Los cierres del staff son independientes de los de jugadores. Para cambiar
   una asistencia, reabrirla; para cambiar una convocatoria con asistencia
   cerrada, reabrir primero la asistencia. Los registros se conservan.

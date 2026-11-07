@@ -103,6 +103,21 @@ END $$;
 
 -- Fail the complete installation if an unknown definer RPC or owner-bypassing
 -- view would provide an unreviewed alternative to the membership checks.
+-- Legacy read models keep their SELECT definitions; enforce the caller's RLS
+-- instead of their owner's permissions. The frontend reads base tables directly.
+DO $$ DECLARE view_name text; kind "char"; BEGIN
+  FOREACH view_name IN ARRAY ARRAY['session_evaluation_summary','player_overview','active_player_injuries'] LOOP
+    SELECT c.relkind INTO kind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relname=view_name;
+    IF FOUND THEN
+      IF kind<>'v' THEN RAISE EXCEPTION 'Revisar relación adicional: % no es una vista ordinaria',view_name; END IF;
+      EXECUTE format('ALTER VIEW public.%I SET (security_invoker=true)',view_name);
+      EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC,anon,authenticated',view_name);
+      EXECUTE format('GRANT SELECT ON public.%I TO authenticated',view_name);
+    END IF;
+  END LOOP;
+END $$;
+
 DO $$ DECLARE unexpected text; BEGIN
   SELECT string_agg(p.oid::regprocedure::text,', ') INTO unexpected FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.prosecdef AND p.prokind='f' AND p.prorettype<>'trigger'::regtype

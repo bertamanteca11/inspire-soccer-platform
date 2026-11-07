@@ -3,7 +3,16 @@
 WITH private_tables(name) AS (VALUES
   ('private_staff_control'),('private_staff_members'),('private_staff_workflows'),
   ('private_staff_callups'),('private_staff_attendance'),('private_staff_cards'),('private_staff_suspensions')
+), legacy_views(name) AS (VALUES ('session_evaluation_summary'),('player_overview'),('active_player_injuries')
 ), checks(name,ok) AS (
+  SELECT 'legacy_view:'||v.name,CASE WHEN c.oid IS NULL THEN true ELSE c.relkind='v'
+    AND coalesce('security_invoker=true'=ANY(c.reloptions),false)
+    AND has_table_privilege('authenticated',c.oid,'SELECT')
+    AND NOT has_table_privilege('anon',c.oid,'SELECT')
+    AND NOT has_table_privilege('authenticated',c.oid,'INSERT,UPDATE,DELETE') END
+  FROM legacy_views v LEFT JOIN pg_namespace n ON n.nspname='public'
+    LEFT JOIN pg_class c ON c.relnamespace=n.oid AND c.relname=v.name
+  UNION ALL
   SELECT 'legacy_suspension_rpc_not_exposed',CASE WHEN to_regprocedure('public.advance_suspensions_for_match(uuid)') IS NULL THEN true ELSE
     NOT has_function_privilege('authenticated',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE')
     AND NOT has_function_privilege('anon',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE') END

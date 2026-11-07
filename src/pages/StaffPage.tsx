@@ -50,9 +50,16 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
   }, [canAccess, sessionId, refresh]);
   useEffect(() => {
     setCallups(Object.fromEntries(workspace?.callups.map(c => [c.staff_id,c.status]) || []));
-    setAttendance(Object.fromEntries(workspace?.attendance.map(a => [a.staff_id,{status:a.status,notes:a.notes || ''}]) || []));
+    const initial = Object.fromEntries(workspace?.attendance.map(a => [a.staff_id,{status:a.status,notes:a.notes || ''}]) || []);
+    const currentSession = sessions.find(s => s.id === workspace?.session_id);
+    if (workspace?.workflow.callup_confirmed && !workspace.workflow.attendance_confirmed && currentSession && ['planned','completed'].includes(currentSession.status)) {
+      for (const callup of workspace.callups) {
+        if (callup.status === 'called_up' && !initial[callup.staff_id]) initial[callup.staff_id] = {status:'present',notes:''};
+      }
+    }
+    setAttendance(initial);
     setAcknowledged(false);
-  }, [workspace]);
+  }, [workspace, sessions]);
 
   if (!canAccess) return <Card><p role="alert">Esta sección es privada para los perfiles Admin.</p></Card>;
   const session = sessions.find(s => s.id === sessionId);

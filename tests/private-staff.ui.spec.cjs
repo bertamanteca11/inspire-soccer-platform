@@ -46,10 +46,9 @@ test('mobile staff callup requires explicit choices and sanction acknowledgement
   await page.screenshot({path:'.phase4-test-artifacts/private-staff-mobile.png',fullPage:true});
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
-test('staff attendance starts unset, preserves a reason and confirms without evaluation',async({page})=>{
+test('staff attendance defaults to present, preserves an edited reason and confirms without evaluation',async({page})=>{
   const state=await setup(page,{confirmed:true});await page.goto('/staff-test');await page.getByRole('group',{name:'Apartados del staff'}).getByRole('button',{name:'Asistencia',exact:true}).click();
-  await expect(page.getByLabel('Asistencia de Staff de prueba',{exact:true})).toHaveValue('');
-  await page.getByRole('button',{name:'Confirmar asistencia del staff',exact:true}).click();expect(state.writes).toEqual([]);
+  await expect(page.getByLabel('Asistencia de Staff de prueba',{exact:true})).toHaveValue('present');expect(state.writes).toEqual([]);
   await page.getByLabel('Asistencia de Staff de prueba',{exact:true}).selectOption('late');
   await page.getByRole('button',{name:'Confirmar asistencia del staff',exact:true}).click();expect(state.writes).toEqual([]);
   await page.getByLabel('Notas de asistencia de Staff de prueba').fill('Tráfico');
@@ -57,6 +56,16 @@ test('staff attendance starts unset, preserves a reason and confirms without eva
   await expect(page.getByRole('status')).toHaveText('Asistencia del staff confirmada.');
   expect(state.writes[0].p_payload.rows).toEqual([{staff_id:'staff-1',status:'late',notes:'Tráfico'}]);
   await expect(page.locator('.private-staff-page').getByRole('button',{name:/Evaluar/})).toHaveCount(0);
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('untouched staff attendance defaults are persisted only when explicitly confirmed',async({page})=>{
+  const state=await setup(page,{confirmed:true});await page.goto('/staff-test');
+  await page.getByRole('group',{name:'Apartados del staff'}).getByRole('button',{name:'Asistencia',exact:true}).click();
+  await expect(page.getByLabel('Asistencia de Staff de prueba',{exact:true})).toHaveValue('present');expect(state.writes).toEqual([]);
+  await page.getByRole('button',{name:'Confirmar asistencia del staff',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('Asistencia del staff confirmada.');
+  expect(state.writes[0].p_payload.rows).toEqual([{staff_id:'staff-1',status:'present',notes:''}]);
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('staff sanction completion requires confirmation and keeps historical card totals',async({page})=>{

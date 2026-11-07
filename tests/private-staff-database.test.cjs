@@ -47,6 +47,9 @@ test('private staff and membership restrictions against the exported schema and 
       END $$;
       GRANT EXECUTE ON FUNCTION public.advance_suspensions_for_match(uuid) TO anon,authenticated,service_role;`);
     const legacyBody=(await db.query("SELECT pg_get_functiondef('public.advance_suspensions_for_match(uuid)'::regprocedure) AS definition")).rows[0].definition;
+    const legacyViews=['session_evaluation_summary','player_overview','active_player_injuries'];
+    for(const name of legacyViews)await db.exec(`CREATE VIEW public.${name} AS SELECT id,name FROM public.players;GRANT ALL ON public.${name} TO PUBLIC,anon,authenticated;`);
+    const viewDefinitions=(await db.query("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY($1) ORDER BY viewname",[legacyViews])).rows;
     await t.test('ambiguous shared Coach setup aborts atomically instead of granting every coach access',async()=>{
       await db.query("UPDATE profiles SET role='coach' WHERE id=$1",[outsider]);
       await assert.rejects(db.exec(configured()),/una \u00fanica cuenta Coach/);
@@ -62,6 +65,19 @@ test('private staff and membership restrictions against the exported schema and 
       await db.exec('DROP FUNCTION public.validation_only_unreviewed_rpc();');
     });
     await db.exec(configured(juli));
+    await t.test('legacy view definitions remain intact while invoker RLS excludes unapproved accounts',async()=>{
+      await privileged();
+      assert.deepEqual((await db.query("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY($1) ORDER BY viewname",[legacyViews])).rows,viewDefinitions);
+      for(const person of [susan,juli,outsider,null]){
+        await auth(person);
+        for(const name of legacyViews){
+          if(!person){await assert.rejects(db.query('SELECT * FROM '+name),/permission denied/);continue;}
+          assert.equal((await db.query('SELECT * FROM '+name)).rows.length,person===outsider?0:1);
+          await assert.rejects(db.query("UPDATE "+name+" SET name='Denied'"),/permission denied/);
+        }
+      }
+      await privileged();
+    });
     await t.test('legacy suspension RPC keeps its body and internal permissions but loses direct client access',async()=>{
       await privileged();
       assert.equal((await db.query("SELECT pg_get_functiondef('public.advance_suspensions_for_match(uuid)'::regprocedure) AS definition")).rows[0].definition,legacyBody);
