@@ -6,10 +6,10 @@ export type StaffAttendance = { staff_id: string; status: string; notes: string 
 export type StaffCard = { id: string; staff_id: string; type: string; reason: string; created_at: string };
 export type StaffSuspension = { id: string; staff_id: string; source: string; matches_total: number; served_at: string | null };
 export type StaffWorkspace = {
-  session_id: string; revision: number; workflow: { callup_confirmed: boolean; attendance_confirmed: boolean };
+  session_id: string | null; revision: number; workflow: { callup_confirmed: boolean; attendance_confirmed: boolean };
   members: StaffMember[]; callups: StaffCallup[]; attendance: StaffAttendance[]; cards: StaffCard[]; suspensions: StaffSuspension[];
 };
-function verifiedWorkspace(data: any, sessionId: string): StaffWorkspace {
+function verifiedWorkspace(data: any, sessionId: string | null): StaffWorkspace {
   if (data?.session_id !== sessionId || !Number.isSafeInteger(data?.revision) || data.revision < 0 ||
     typeof data?.workflow?.callup_confirmed !== 'boolean' || typeof data?.workflow?.attendance_confirmed !== 'boolean' ||
     !['members','callups','attendance','cards','suspensions'].every(key => Array.isArray(data[key]))) {
@@ -23,7 +23,7 @@ function staffError(error: { code?: string; message: string }) {
   if (error.code === '23514') return 'Revisa los datos: los retrasos y ausencias necesitan una explicación.';
   return error.message;
 }
-export async function readStaffWorkspace(sessionId: string) {
+export async function readStaffWorkspace(sessionId: string | null) {
   const { data, error } = await supabase.rpc('private_staff_workspace', { p_session: sessionId });
   if (error) throw new Error(staffError(error));
   return verifiedWorkspace(data, sessionId);

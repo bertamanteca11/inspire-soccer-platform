@@ -3,19 +3,21 @@ import { LockKeyhole, Plus, ShieldAlert } from 'lucide-react';
 import { Card, Modal, PageTitle } from '../components/ui';
 import { loadAllSessions } from '../lib/data';
 import { readStaffWorkspace, staffAction, type StaffWorkspace } from '../staff/api';
+import { StaffDirectory } from '../staff/StaffDirectory';
 import type { AppSession } from '../utils/appTypes';
 import { buildSessionLabel, translateAttendance, translateCard } from '../utils/formatters';
 import '../styles/private-staff.css';
 
 const callupOptions = [['called_up','Convocado'],['not_called','No convocado'],['injured','Lesionado'],['doubt','Duda']];
 const attendanceOptions = ['present','late','justified_late','justified_absence','unjustified_absence','injured','injured_present','injured_justified_absence','injured_unjustified_absence'];
-type Section = 'callup' | 'attendance' | 'cards' | 'roster';
+type Section = 'callup' | 'attendance' | 'cards' | 'roster' | 'legacy-roster';
 
 export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean; initialSessionId?: string }) {
   const [sessions, setSessions] = useState<AppSession[]>([]);
   const [sessionId, setSessionId] = useState('');
   const [workspace, setWorkspace] = useState<StaffWorkspace | null>(null);
-  const [section, setSection] = useState<Section>('callup');
+  const [section, setSection] = useState<Section>('roster');
+  const isDirectory = section === 'roster';
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [refresh, setRefresh] = useState(0);
@@ -29,25 +31,26 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
 
   useEffect(() => {
     if (!canAccess) { setSessions([]); setWorkspace(null); setLoading(false); return; }
+    if (isDirectory) return;
     let cancelled = false;
     setLoading(true); setError('');
     loadAllSessions().then(rows => {
       if (cancelled) return;
       setSessions(rows);
-      setSessionId(rows.some(s => s.id === initialSessionId) ? initialSessionId! : rows.find(s => ['planned','completed'].includes(s.status))?.id || rows[0]?.id || '');
+      setSessionId(current => rows.some(s => s.id === current) ? current : rows.some(s => s.id === initialSessionId) ? initialSessionId! : rows.find(s => ['planned','completed'].includes(s.status))?.id || rows[0]?.id || '');
       if (!rows.length) setLoading(false);
     }).catch(failure => { if (!cancelled) { setError(String(failure)); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [canAccess, initialSessionId]);
+  }, [canAccess, initialSessionId, isDirectory]);
   useEffect(() => {
-    if (!canAccess || !sessionId) return;
+    if (!canAccess || !sessionId || isDirectory) return;
     let cancelled = false;
     setWorkspace(null); setLoading(true); setError(''); setNotice(''); setAcknowledged(false); setServeId('');
     setCardForm({staff_id:'',type:'yellow',reason:'',matches:'1'});
     readStaffWorkspace(sessionId).then(data => { if (!cancelled) { setWorkspace(data); setLoading(false); } })
       .catch(failure => { if (!cancelled) { setError(failure.message); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [canAccess, sessionId, refresh]);
+  }, [canAccess, sessionId, refresh, isDirectory]);
   useEffect(() => {
     setCallups(Object.fromEntries(workspace?.callups.map(c => [c.staff_id,c.status]) || []));
     const initial = Object.fromEntries(workspace?.attendance.map(a => [a.staff_id,{status:a.status,notes:a.notes || ''}]) || []);
@@ -92,15 +95,16 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
     await act(confirm ? 'confirm_attendance' : 'save_attendance',{rows:visits.map(m => ({staff_id:m.id,...attendance[m.id]}))},confirm ? 'Asistencia del staff confirmada.' : 'Asistencia del staff guardada.');
   }
   return <div className="stack private-staff-page">
-    <PageTitle title="Staff" subtitle="Convocatoria, asistencia y disciplina del equipo técnico."/>
+    <PageTitle title="Staff" subtitle="Miembros del equipo técnico y gestión por sesión."/>
     <div className="staff-privacy"><LockKeyhole size={16}/><span>Privado · Administración</span></div>
+    <div className="staff-tabs" role="group" aria-label="Apartados del staff">{([['roster','Miembros'],['callup','Convocatoria'],['attendance','Asistencia'],['cards','Tarjetas']] as const).map(([value,label]) => <button key={value} aria-pressed={section===value || value==='roster' && section==='legacy-roster'} disabled={busy} onClick={() => setSection(value)}>{label}</button>)}</div>
+    {isDirectory ? <StaffDirectory onBusyChange={setBusy} onLegacyRoster={() => setSection('legacy-roster')}/> : <>
     <div className="staff-session-picker"><label>Sesión del staff<select value={sessionId} disabled={busy || !sessions.length} onChange={e => setSessionId(e.target.value)}>{sessions.map(s => <option key={s.id} value={s.id}>{s.name} · {buildSessionLabel(s)}{!['planned','completed'].includes(s.status) ? ' · Solo consulta' : ''}</option>)}</select></label><button className="chip" disabled={busy || loading} onClick={() => setRefresh(n => n+1)}>Actualizar staff</button></div>
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="success" role="status">{notice}</p>}
-    {loading ? <Card><p role="status">Cargando staff…</p></Card> : !sessions.length ? <Card><p>Crea una sesión para comenzar.</p></Card> : workspace && <>
+    {loading ? <Card><p role="status">Cargando staff…</p></Card> : !sessions.length ? <Card><p>Para registrar convocatoria, asistencia o tarjetas, crea primero una sesión. La lista de miembros está disponible en Miembros.</p></Card> : workspace && <>
       {readOnly && <p className="muted">Sesión de solo consulta.</p>}
-      <div className="staff-tabs" role="group" aria-label="Apartados del staff">{([['callup','Convocatoria'],['attendance','Asistencia'],['cards','Tarjetas'],['roster','Miembros']] as const).map(([value,label]) => <button key={value} aria-pressed={section===value} disabled={busy} onClick={() => setSection(value)}>{label}</button>)}</div>
       {!members.length && <Card><p>Añade primero los miembros del equipo técnico.</p><button className="secondary" onClick={() => setSection('roster')}>Añadir miembros</button></Card>}
-      {section==='roster' && <>
+      {section==='legacy-roster' && <>
         <Card><h3>Miembros del staff</h3>{members.map(m => <div className="staff-person" key={m.id}><div><strong>{m.name}</strong><p className="muted">{m.job || 'Equipo técnico'} · {m.active ? 'Activo' : 'Inactivo'}</p></div><button className="chip" disabled={busy || readOnly} onClick={() => void act('member_active',{staff_id:m.id,active:!m.active},'Estado del miembro actualizado.')}>{m.active ? 'Desactivar' : 'Activar'}</button></div>)}</Card>
         <Card><form className="stack" onSubmit={async e => { e.preventDefault(); if (await act('add_member',memberForm,'Miembro añadido al staff.')) setMemberForm({name:'',job:''}); }}><h3>Añadir miembro</h3><label>Nombre del miembro<input required maxLength={120} value={memberForm.name} disabled={busy || readOnly} onChange={e => setMemberForm({...memberForm,name:e.target.value})}/></label><label>Función en el equipo<input maxLength={120} value={memberForm.job} disabled={busy || readOnly} onChange={e => setMemberForm({...memberForm,job:e.target.value})} placeholder="Entrenador, fisio…"/></label><button className="primary" disabled={busy || readOnly}><Plus size={16}/>Añadir miembro</button></form></Card>
       </>}
@@ -123,6 +127,7 @@ export function StaffPage({ canAccess, initialSessionId }: { canAccess: boolean;
         <Card><h3>Tarjetas de esta sesión</h3>{workspace.cards.length ? workspace.cards.map(c => <div className="staff-person" key={c.id}><div><strong>{memberName(c.staff_id)} · {translateCard(c.type)}</strong><p>{c.reason}</p></div></div>) : <p>No hay tarjetas registradas.</p>}</Card>
         {!!workspace.suspensions.some(s => s.served_at) && <details><summary>Sanciones cumplidas</summary><Card>{workspace.suspensions.filter(s => s.served_at).map(s => <p key={s.id}>{memberName(s.staff_id)} · {s.matches_total} {s.matches_total===1 ? 'partido' : 'partidos'} · Cumplida</p>)}</Card></details>}
       </>}
+    </>}
     </>}
     {serveId && <Modal title="Marcar sanción cumplida" onClose={() => { if (!busy) setServeId(''); }}><p>Confirma que {memberName(activeSanctions.find(s => s.id===serveId)?.staff_id || '')} ha cumplido todos los partidos de esta sanción.</p><p>Las tarjetas se conservan en el histórico. Si es por acumulación de amarillas, el recuento para la próxima sanción empieza de nuevo.</p><button className="primary" disabled={busy} onClick={async () => { if (await act('serve_suspension',{suspension_id:serveId},'Sanción marcada como cumplida.')) setServeId(''); }}>Confirmar sanción cumplida</button></Modal>}
   </div>;

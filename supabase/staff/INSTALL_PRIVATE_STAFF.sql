@@ -182,7 +182,7 @@ END $$;
 CREATE FUNCTION public.private_staff_workspace(p_session uuid) RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 DECLARE result jsonb; BEGIN
   IF NOT public.app_private_staff_access() THEN RAISE EXCEPTION 'Sección privada: acceso denegado' USING ERRCODE='42501'; END IF;
-  IF NOT EXISTS(SELECT 1 FROM public.sessions WHERE id=p_session) THEN RAISE EXCEPTION 'Sesión no encontrada'; END IF;
+  IF p_session IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.sessions WHERE id=p_session) THEN RAISE EXCEPTION 'Sesión no encontrada'; END IF;
   SELECT jsonb_build_object('session_id',p_session,'revision',(SELECT revision FROM public.private_staff_control),
     'workflow',coalesce((SELECT to_jsonb(w) FROM public.private_staff_workflows w WHERE session_id=p_session),'{"callup_confirmed":false,"attendance_confirmed":false}'::jsonb),
     'members',coalesce((SELECT jsonb_agg(to_jsonb(q) ORDER BY q.name,q.id) FROM (
@@ -208,6 +208,8 @@ BEGIN
   SELECT revision INTO revision_now FROM public.private_staff_control FOR UPDATE;
   IF p_revision IS DISTINCT FROM revision_now THEN RAISE EXCEPTION 'Los datos han cambiado. Actualiza el staff antes de guardar.' USING ERRCODE='40001'; END IF;
   IF jsonb_typeof(p_payload) IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'Datos inválidos'; END IF;
+  -- Member management is global. Only sporting workflows require a session.
+  IF p_action NOT IN ('add_member','member_active') THEN
   SELECT * INTO s FROM public.sessions WHERE id=p_session FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Sesión no encontrada'; END IF;
   IF s.status::text NOT IN ('planned','completed') OR (s.locked_at IS NOT NULL AND public.batch4_actor_role()<>'admin') THEN
@@ -217,6 +219,7 @@ BEGIN
   SELECT coalesce(array_agg(m.id),ARRAY[]::uuid[]) INTO active_ids FROM public.private_staff_members m WHERE m.active
     OR EXISTS(SELECT 1 FROM public.private_staff_callups c WHERE c.staff_id=m.id AND c.session_id=p_session)
     OR EXISTS(SELECT 1 FROM public.private_staff_attendance a WHERE a.staff_id=m.id AND a.session_id=p_session);
+  END IF;
   IF p_action='add_member' THEN
     INSERT INTO public.private_staff_members(name,job) VALUES(btrim(p_payload->>'name'),btrim(coalesce(p_payload->>'job','')));
   ELSIF p_action='member_active' THEN

@@ -5,6 +5,12 @@ WITH private_tables(name) AS (VALUES
   ('private_staff_callups'),('private_staff_attendance'),('private_staff_cards'),('private_staff_suspensions')
 ), legacy_views(name) AS (VALUES ('session_evaluation_summary'),('player_overview'),('active_player_injuries')
 ), checks(name,ok) AS (
+  SELECT 'staff_directory_read',coalesce((SELECT position('IF p_session IS NOT NULL AND NOT EXISTS' IN pg_get_functiondef(p.oid))>0
+    FROM pg_proc p WHERE p.oid=to_regprocedure('public.private_staff_workspace(uuid)')),false)
+  UNION ALL
+  SELECT 'staff_directory_write',coalesce((SELECT position('IF p_action NOT IN (''add_member'',''member_active'') THEN' IN pg_get_functiondef(p.oid))>0
+    FROM pg_proc p WHERE p.oid=to_regprocedure('public.private_staff_action(uuid,text,jsonb,bigint)')),false)
+  UNION ALL
   SELECT 'staff_revision_update_scoped',coalesce((SELECT position(
     'UPDATE public.private_staff_control SET revision=revision+1 WHERE singleton = true;'
     IN pg_get_functiondef(p.oid))>0 FROM pg_proc p

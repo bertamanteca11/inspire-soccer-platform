@@ -7,8 +7,8 @@ trabajo con jugadores y no puede leer ni modificar staff. No se han recibido
 todavía los nuevos requisitos de VEO de Sergi.
 
 Estado: Berta ha instalado el SQL y compartido `all_ok: true` el 7 de noviembre
-de 2026. Comprobados los permisos y la instalación; frontend preparado para
-publicación junto con los ajustes de evaluación inicial y búsqueda de jugadores.
+de 2026. El frontend de staff está publicado junto con los ajustes de evaluación
+inicial y búsqueda de jugadores. La mejora del directorio se describe abajo.
 
 ## Corrección del guardado: UPDATE requires a WHERE clause (7/11/2026)
 
@@ -39,7 +39,39 @@ se comprueba explícitamente para evitar que esa diferencia vuelva a ocultar
 un UPDATE sin filtro. Docker no está disponible para repetirlo con la extensión
 nativa en esta máquina. No es necesario modificar ni desplegar el frontend.
 
-## Configuración de cuentas
+## Directorio de miembros sin sesión (7/11/2026)
+
+Staff abre directamente **Miembros**. La lista y el formulario de alta no
+cargan el catálogo de sesiones ni exigen una sesión existente. Los Admin pueden
+añadir al fisio, activar o desactivar miembros incluso si no hay ninguna sesión
+o solo quedan sesiones archivadas. Convocatoria, Asistencia y Tarjetas muestran
+su propio selector de sesión al entrar en cada apartado.
+
+Para una instalación existente, ejecutar una vez
+`supabase/staff/ENABLE_STAFF_DIRECTORY.sql` completo como `postgres`. El resultado
+debe ser `staff_directory_check.all_ok: true`. Berta aportó ese resultado el
+7/11/2026. La actualización modifica únicamente dos definiciones de funciones,
+mantiene firmas, propietario, grants, control de revisión y acceso exclusivo de
+Admin, y puede ejecutarse de nuevo. No requiere reinstalar Staff ni cambia sus
+datos. El instalador para proyectos nuevos ya incorpora la mejora.
+
+El directorio usa `p_session=NULL` en los RPC existentes. Solo `add_member` y
+`member_active` omiten la validación y preparación de sesión; las demás acciones
+siguen requiriendo una sesión operativa real. La lectura sin sesión devuelve la
+lista general, las confirmaciones por defecto y los registros de sesión vacíos.
+No crea filas de workflow ni modifica confirmaciones al añadir miembros.
+
+La pantalla conserva temporalmente el acceso anterior por sesión si detecta una
+base que aún no tiene aplicada la actualización. Los conflictos de revisión
+conservan el formulario para que se puedan revisar los datos y reintentar.
+
+Mensaje para Susan:
+
+> Go to Más → Staff → Miembros. You can add the physio there without choosing a
+> session. This is the general staff list. To record a call-up, attendance or a
+> card, open that section and select the relevant session.
+
+## Cuentas autorizadas
 
 La instalación autoriza los identificadores de los perfiles Admin actuales y
 una sola cuenta Coach. Si hay un único perfil Coach, se detecta automáticamente;

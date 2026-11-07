@@ -1,5 +1,5 @@
 const {test,expect}=require('@playwright/test');
-async function setup(page,{confirmed=false,sanction=false,stale=false,archived=false}={}){
+async function setup(page,{confirmed=false,sanction=false,stale=false,archived=false,noSessions=false,legacy=false}={}){
   const writes=[],reads=[],unexpected=[],errors=[];
   const session={id:'session-1',name:'Partido de prueba',session_date:'2026-11-06',type:'league_match',status:archived?'archived':'planned'};
   let data={session_id:session.id,revision:2,workflow:{callup_confirmed:confirmed,attendance_confirmed:false},members:[{id:'staff-1',name:'Staff de prueba',job:'Entrenador',active:true,cycle_yellows:sanction?5:0,historical_yellows:sanction?5:0,historical_reds:0}],callups:confirmed?[{staff_id:'staff-1',status:'called_up'}]:[],attendance:[],cards:[],suspensions:sanction?[{id:'sanction-1',staff_id:'staff-1',matches_total:1,source:'yellow_accumulation',served_at:null}]:[]};
@@ -11,8 +11,13 @@ async function setup(page,{confirmed=false,sanction=false,stale=false,archived=f
       return route.continue();
     }
     const name=url.pathname.split('/').pop();
-    if(name==='sessions'&&request.method()==='GET'){reads.push(name);return route.fulfill({json:Number(url.searchParams.get('offset')||0)?[]:[session]});}
-    if(name==='private_staff_workspace'){reads.push(name);return route.fulfill({json:data});}
+    const workspace=sessionId=>({...data,session_id:sessionId,...(sessionId===null?{workflow:{callup_confirmed:false,attendance_confirmed:false},callups:[],attendance:[],cards:[]}: {})});
+    if(name==='sessions'&&request.method()==='GET'){reads.push(name);return route.fulfill({json:noSessions||Number(url.searchParams.get('offset')||0)?[]:[session]});}
+    if(name==='private_staff_workspace'){
+      reads.push(name);const sid=request.postDataJSON().p_session;
+      if(legacy&&sid===null)return route.fulfill({status:400,json:{code:'P0001',message:'Sesión no encontrada'}});
+      return route.fulfill({json:workspace(sid)});
+    }
     if(name==='private_staff_action'){
       const body=request.postDataJSON();writes.push(body);
       if(stale)return route.fulfill({status:409,json:{code:'40001',message:'Los datos han cambiado. Actualiza el staff antes de guardar.'}});
@@ -21,7 +26,8 @@ async function setup(page,{confirmed=false,sanction=false,stale=false,archived=f
       if(action.includes('attendance')&&!action.startsWith('reopen')){data.attendance=payload.rows;data.workflow.attendance_confirmed=action==='confirm_attendance';}
       if(action==='serve_suspension'){data.suspensions[0].served_at='2026-11-06T12:00:00Z';data.members[0].cycle_yellows=0;}
       if(action==='add_member')data.members.push({id:'staff-2',name:payload.name,job:payload.job,active:true,cycle_yellows:0,historical_yellows:0,historical_reds:0});
-      return route.fulfill({json:data});
+      if(action==='member_active')data.members.find(m=>m.id===payload.staff_id).active=payload.active;
+      return route.fulfill({json:workspace(body.p_session)});
     }
     unexpected.push(request.method()+' '+url.pathname);return route.abort();
   });
@@ -34,6 +40,7 @@ test('private staff denial makes no reads or writes even for an Admin shell',asy
 });
 test('mobile staff callup requires explicit choices and sanction acknowledgement before confirmation',async({page})=>{
   const state=await setup(page,{sanction:true});await page.setViewportSize({width:320,height:740});await page.goto('/staff-test');
+  await page.getByRole('group',{name:'Apartados del staff'}).getByRole('button',{name:'Convocatoria',exact:true}).click();
   await page.getByRole('button',{name:'Confirmar convocatoria del staff',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('cada miembro');expect(state.writes).toEqual([]);
   await page.getByLabel('Convocatoria de Staff de prueba').selectOption('called_up');
@@ -77,7 +84,9 @@ test('staff sanction completion requires confirmation and keeps historical card 
   expect(state.writes[0].p_action).toBe('serve_suspension');expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 test('stale staff save reports a conflict and retains the unsaved selection',async({page})=>{
-  const state=await setup(page,{stale:true});await page.goto('/staff-test');await page.getByLabel('Convocatoria de Staff de prueba').selectOption('not_called');
+  const state=await setup(page,{stale:true});await page.goto('/staff-test');
+  await page.getByRole('group',{name:'Apartados del staff'}).getByRole('button',{name:'Convocatoria',exact:true}).click();
+  await page.getByLabel('Convocatoria de Staff de prueba').selectOption('not_called');
   await page.getByRole('button',{name:'Guardar convocatoria del staff',exact:true}).click();await expect(page.getByRole('alert')).toContainText('han cambiado');
   await expect(page.getByLabel('Convocatoria de Staff de prueba')).toHaveValue('not_called');
   await expect(page.getByRole('status')).toHaveCount(0);expect(state.writes).toHaveLength(1);expect(state.errors).toEqual([]);
@@ -88,6 +97,42 @@ test('staff member creation is separate from user access and archived sessions s
   await page.getByRole('button',{name:'Añadir miembro',exact:true}).click();await expect(page.getByText('Fisio de prueba',{exact:true})).toBeVisible();
   expect(state.writes[0].p_action).toBe('add_member');expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
   await page.unroute('**/*');state=await setup(page,{archived:true});await page.goto('/staff-test');
+  await page.getByRole('group',{name:'Apartados del staff'}).getByRole('button',{name:'Convocatoria',exact:true}).click();
   await expect(page.getByText('Sesión de solo consulta.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Confirmar convocatoria del staff',exact:true})).toBeDisabled();expect(state.writes).toEqual([]);
+});
+
+test('staff opens its global directory and adds a physio with zero sessions and no session queries',async({page})=>{
+  const state=await setup(page,{noSessions:true});await page.setViewportSize({width:320,height:740});await page.goto('/staff-test');
+  await expect(page.getByRole('heading',{name:'Miembros del equipo técnico',exact:true})).toBeVisible();
+  await expect(page.getByLabel('Sesión del staff')).toHaveCount(0);
+  await expect(page.getByText('Staff de prueba',{exact:true})).toBeVisible();
+  expect(state.reads).not.toContain('sessions');expect(state.writes).toEqual([]);
+  await page.getByLabel('Nombre del miembro').fill('Fisio sin sesión');await page.getByLabel('Función en el equipo').fill('Fisioterapeuta');
+  await page.getByRole('button',{name:'Añadir miembro',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('Miembro añadido a la lista general del staff.');
+  await expect(page.getByText('Fisio sin sesión',{exact:true})).toBeVisible();
+  expect(state.writes).toEqual([{p_session:null,p_action:'add_member',p_payload:{name:'Fisio sin sesión',job:'Fisioterapeuta'},p_revision:2}]);
+  expect(state.reads).not.toContain('sessions');expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:'.phase4-test-artifacts/staff-directory-mobile.png',fullPage:true});
+});
+
+test('directory activation is independent from archived sessions and never submits a session ID',async({page})=>{
+  const state=await setup(page,{archived:true});await page.goto('/staff-test');
+  await page.getByRole('button',{name:'Desactivar',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('Estado del miembro actualizado.');
+  expect(state.writes[0]).toMatchObject({p_session:null,p_action:'member_active',p_payload:{staff_id:'staff-1',active:false}});
+  expect(state.reads).not.toContain('sessions');expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
+test('an older database keeps the session-based member form usable until its upgrade is applied',async({page})=>{
+  const state=await setup(page,{legacy:true});await page.goto('/staff-test');
+  await expect(page.getByRole('alert')).toContainText('pendiente de activar');
+  await page.getByRole('button',{name:'Gestionar miembros desde una sesión',exact:true}).click();
+  await page.getByLabel('Nombre del miembro').fill('Fisio provisional');
+  await page.getByRole('button',{name:'Añadir miembro',exact:true}).click();
+  await expect(page.getByText('Fisio provisional',{exact:true})).toBeVisible();
+  expect(state.writes[0]).toMatchObject({p_session:'session-1',p_action:'add_member'});
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });

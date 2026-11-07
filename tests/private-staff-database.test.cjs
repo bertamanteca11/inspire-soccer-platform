@@ -108,6 +108,46 @@ test('private staff and membership restrictions against the exported schema and 
     await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[outsider]);
     await auth(susan);let initial=await action('add_member',{name:'Technical staff fixture',job:'Entrenador'});const member=initial.members[0].id;
     const called={rows:[{staff_id:member,status:'called_up'}]};
+    await t.test('directory upgrade patches a legacy installation, preserves data and permissions, and is idempotent',async()=>{
+      await privileged();
+      const signatures=['public.private_staff_workspace(uuid)','public.private_staff_action(uuid,text,jsonb,bigint)'];
+      const definition=async signature=>(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS body',[signature])).rows[0].body.replace(/\r\n/g,'\n');
+      const metadata=async signature=>(await db.query('SELECT proowner,proacl,prosecdef,proconfig FROM pg_proc WHERE oid=$1::regprocedure',[signature])).rows[0];
+      const tables=['private_staff_members','private_staff_control','private_staff_workflows','private_staff_callups','private_staff_attendance','private_staff_cards','private_staff_suspensions','sessions','callups','attendance','evaluations','app_access_members'];
+      const snapshot=()=>Promise.all(tables.map(async table=>(await db.query('SELECT to_jsonb(t) AS row FROM '+table+' t ORDER BY to_jsonb(t)::text')).rows));
+      const canonical=await Promise.all(signatures.map(definition)),permissions=await Promise.all(signatures.map(metadata)),before=await snapshot();
+      const legacyRead=canonical[0].replace('IF p_session IS NOT NULL AND NOT EXISTS','IF NOT EXISTS');
+      const legacyWrite=canonical[1].replace("  -- Member management is global. Only sporting workflows require a session.\n  IF p_action NOT IN ('add_member','member_active') THEN\n",'')
+        .replace("  END IF;\n  IF p_action='add_member' THEN","  IF p_action='add_member' THEN");
+      assert.notEqual(legacyRead,canonical[0]);assert.notEqual(legacyWrite,canonical[1]);
+      await db.exec(legacyRead);await db.exec(legacyWrite);
+      await auth(susan);await assert.rejects(workspace(null),/Sesión no encontrada/);
+      await assert.rejects(action('add_member',{name:'Must roll back'},0,null),/han cambiado|Sesión no encontrada/);
+      await privileged();
+      for(let i=0;i<2;i++){
+        await db.exec(read('supabase/staff/ENABLE_STAFF_DIRECTORY.sql'));
+        assert.deepEqual(await Promise.all(signatures.map(definition)),canonical);
+        assert.deepEqual(await Promise.all(signatures.map(metadata)),permissions);
+        assert.deepEqual(await snapshot(),before);
+      }
+    });
+    await t.test('Admin manages staff with zero sessions; other workflows still require a session and Coach stays denied',()=>isolated(async()=>{
+      await privileged();await db.query('DELETE FROM public.sessions WHERE id IN ($1,$2)',[sid,otherSid]);
+      await auth(susan);const before=await workspace(null);
+      const added=await action('add_member',{name:'Physio without a session',job:'Fisio'},before.revision,null);
+      assert.equal(added.session_id,null);assert.equal(added.revision,before.revision+1);
+      assert.equal(added.callups.length,0);assert.equal(added.attendance.length,0);assert.equal(added.cards.length,0);
+      const physio=added.members.find(m=>m.name==='Physio without a session');assert(physio);
+      const disabled=await action('member_active',{staff_id:physio.id,active:false},added.revision,null);
+      assert.equal(disabled.members.find(m=>m.id===physio.id).active,false);
+      for(const name of ['save_callup','confirm_callup','save_attendance','confirm_attendance','reopen_callup','reopen_attendance','add_card','serve_suspension']){
+        await assert.rejects(action(name,{},disabled.revision,null),/Sesión no encontrada/);
+      }
+      await assert.rejects(action('add_member',{name:'Stale'},before.revision,null),/han cambiado/);
+      await auth(juli);await assert.rejects(workspace(null),/denegado/);
+      await assert.rejects(action('add_member',{name:'Denied'},disabled.revision,null),/denegado/);
+      await privileged();assert.equal((await db.query('SELECT count(*) AS n FROM private_staff_workflows')).rows[0].n,0);
+    }));
     await t.test('the staff hotfix patches only the legacy counter predicate, preserves data and security, and can run twice',async()=>{
       await privileged();
       const signature="'public.private_staff_action(uuid,text,jsonb,bigint)'::regprocedure";
