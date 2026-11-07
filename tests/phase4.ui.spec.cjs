@@ -44,7 +44,7 @@ async function setup(page,{failTable=null,failRefresh=false,archiveResult='ok',e
       unexpected.push('unexpected write '+table);return route.abort();
     }
     if(table===failTable || failRefresh && table==='attendance' && writes.length)return route.fulfill({status:403,json:{code:'42501',message:'Read denied'}});
-    const tables={sessions:sessionRows,attendance:rows,players:fixture.players,cards:[],official_evaluations:[],evaluations:[],callups:[{player_id:fixture.marcos,status:'called_up'}]};
+    const tables={sessions:sessionRows,attendance:rows,players:fixture.players,cards:[],official_evaluations:[],evaluations:[],callups:fixture.sessions.map(s=>({session_id:s.id,player_id:fixture.marcos,status:'called_up'}))};
     if(!Object.hasOwn(tables,table)){unexpected.push(table);return route.abort();}
     let records=[...tables[table]];
     for(const key of ['session_id','player_id']){const filter=url.searchParams.get(key);if(filter?.startsWith('eq.'))records=records.filter(row=>row[key]===filter.slice(3));}
@@ -137,16 +137,13 @@ test('an unreadable source fails closed instead of displaying partial totals',as
   await expect(page.getByText('Asistencia del ámbito',{exact:true})).toHaveCount(0);
   expect(state.writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
-test('missing attendance cannot save or confirm as presence without an explicit choice',async({page})=>{
+test('an open attendance defaults to present locally and still requires saving before confirmation',async({page})=>{
   const state=await setup(page);await page.goto('/phase4-test?mode=editor');
-  await expect(page.getByText('Sin registrar',{exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Presente',exact:true})).toHaveAttribute('aria-pressed','false');
+  await expect(page.getByText('Sin registrar',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Presente',exact:true})).toHaveAttribute('aria-pressed','true');
   await expect(page.getByRole('button',{name:'Guardar asistencia',exact:true})).toBeEnabled();
-  await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Selecciona la situación');expect(state.writes).toEqual([]);
   await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
   await expect(page.getByRole('alert')).toContainText('Guarda y verifica');expect(state.writes).toEqual([]);
-  await page.getByRole('button',{name:'Presente',exact:true}).click();
   await page.getByRole('button',{name:'Guardar asistencia',exact:true}).click();
   await expect(page.getByRole('status')).toContainText('guardada correctamente');
   expect(state.writes).toHaveLength(1);expect(state.writes[0].table).toBe('attendance');

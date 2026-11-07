@@ -28,11 +28,12 @@ test('prospective defaults never reinterpret historical, confirmed, unsupported 
   assert.equal(callupDraft(session,{...player,status:'inactive'},[]),null);
   assert.deepEqual(callupDraft(session,{...player,status:'inactive'},[{player_id:'p',status:'called_up',evaluable:true}]),{status:'called_up',evaluable:true});
 });
-test('attendance defaults preserve saved statuses, notes, historical gaps and evaluation requirements',()=>{
-  const s={...session,callup_confirmed:true};
+test('attendance defaults preserve saved statuses, notes, closed-session gaps and evaluation requirements',()=>{
+  const s={...session,status:'planned',callup_confirmed:true,attendance_confirmed:false};
   assert.equal(operationalAttendanceDraft(s,'p',[],true).status,'present');
   assert.equal(operationalAttendanceDraft(s,'p',[],false).status,'');
-  for(const patch of [{draft_defaults_version:null},{callup_confirmed:false},{attendance_confirmed:true}]) assert.equal(operationalAttendanceDraft({...s,...patch},'p',[],true).status,'');
+  assert.equal(operationalAttendanceDraft({...s,draft_defaults_version:null},'p',[],true).status,'present');
+  for(const patch of [{callup_confirmed:false},{attendance_confirmed:true},{status:'archived'},{status:'locked'}]) assert.equal(operationalAttendanceDraft({...s,...patch},'p',[],true).status,'');
   const row={id:'a',session_id:'s',player_id:'p',status:'injured_present',notes:'Existing note'};
   assert.deepEqual(operationalAttendanceDraft(s,'p',[row],true),{status:row.status,notes:row.notes});
   assert.equal(operationalAttendanceDraft(s,'p',[row,{...row,id:'b'}],true).status,'');
