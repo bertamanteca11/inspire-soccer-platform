@@ -22,7 +22,7 @@ export const destinations = [
 export function visibleDestinations(role: Role, canAccessStaff = false) {
   return destinations.filter(item => 'privateStaff' in item && item.privateStaff ? canAccessStaff && ['admin','coach'].includes(role) : ('adminOnly' in item && item.adminOnly) ? role === 'admin' : !item.staff || role === 'admin' || role === 'coach');
 }
-export const primaryTabs: Tab[] = ['home', 'players', 'sessions', 'summary'];
+export const primaryTabs: Tab[] = ['home', 'players', 'sessions', 'injuries'];
 // Match application-shell.css: a wide but short phone still uses mobile navigation.
 export const SIDEBAR_MEDIA = '(min-width: 768px) and (min-height: 500px)';
 export const navigationGroups = ['Vista general', 'Operativa del equipo', 'Jugadores y rendimiento', 'Análisis e informes'];

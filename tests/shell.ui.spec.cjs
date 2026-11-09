@@ -21,7 +21,7 @@ for (const role of Object.keys(roles)) for (const width of [390, 900, 1440]) tes
   const nav = page.getByRole('navigation', { name: width < 768 ? 'Navegación móvil' : 'Navegación principal', exact: true });
   await expect(nav).toBeVisible();
   if (width < 768) {
-    const primary = roles[role].filter(label => ['Inicio','Equipo','Sesiones','Resumen'].includes(label));
+    const primary = roles[role].filter(label => ['Inicio','Equipo','Sesiones','Lesiones'].includes(label));
     await expect(nav.getByRole('button')).toHaveText([...primary,'Más']);
     await nav.getByRole('button', { name: 'Más', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Más herramientas' });
@@ -34,8 +34,8 @@ for (const role of Object.keys(roles)) for (const width of [390, 900, 1440]) tes
   }
   await page.getByLabel('Nota local').fill('Keep draft');
   await page.getByRole('main').focus();
-  await nav.getByRole('button', { name: 'Resumen', exact: true }).click();
-  await expect(nav.getByRole('button', { name: 'Resumen', exact: true })).toHaveAttribute('aria-current','page');
+  await nav.getByRole('button', { name: 'Lesiones', exact: true }).click();
+  await expect(nav.getByRole('button', { name: 'Lesiones', exact: true })).toHaveAttribute('aria-current','page');
   await expect(page.getByTestId('selected-session')).toHaveText('SYNTHETIC-SESSION-01');
   await expect(page.getByLabel('Nota local')).toHaveValue('Keep draft');
   await expect(page.locator('.club-context')).toHaveCount(0);
