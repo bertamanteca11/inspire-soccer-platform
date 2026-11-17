@@ -22,7 +22,7 @@ import {VeoModule} from '../src/pages/VeoModule';
 import {LoginPage} from '../src/pages/LoginPage';
 import {players,sessions,evaluations} from './final.fixture';
 import type {Role} from '../src/types';
-import type {AppSession,Tab} from '../src/utils/appTypes';
+import type {AppSession,Tab,PlayerCardTotal} from '../src/utils/appTypes';
 function Harness(){
   const q=new URLSearchParams(location.search),mode=q.get('mode')||'home',role=(q.get('role')||'admin') as Role;
   const interactive=q.has('interactive');
@@ -31,6 +31,14 @@ function Harness(){
   const [session,setSession]=useState<AppSession>({...sessions[0],type:q.has('match')?'league_match':sessions[0].type,callup_confirmed:mode!=='callup',attendance_confirmed:!['attendance','callup'].includes(mode),draft_defaults_version:q.has('unmarked')?null:1,
     high_rating_limit:q.has('high')?Number(q.get('high')):sessions[0].high_rating_limit,low_rating_limit:q.has('low')?Number(q.get('low')):sessions[0].low_rating_limit});
   const [demoEvaluations,setDemoEvaluations]=useState<any[]|null>(null);
+  const [cardTotals,setCardTotals]=useState<PlayerCardTotal[]>([]);
+  useEffect(()=>{
+    if(mode!=='home')return;
+    let cancelled=false;
+    readPerformancePages<PlayerCardTotal>((a,b)=>supabase.from('player_card_totals').select('*').order('player_id').range(a,b))
+      .then(rows=>{if(!cancelled)setCardTotals(rows);},failure=>{if(!cancelled)setError(String(failure));});
+    return()=>{cancelled=true;};
+  },[mode]);
   useEffect(()=>{
     if(!interactive||mode!=='evaluation')return;
     let cancelled=false;
@@ -56,7 +64,7 @@ function Harness(){
     case 'reports':node=<ReportsPage/>;break;
     case 'veo':case 'veo-import':node=<VeoModule initialSection={mode==='veo-import'?'import':'dashboard'}/>;break;
     case 'login':return <LoginPage logoUrl="/logo.png"/>;
-    default:node=<HomePage role={role} nextSession={session} selectedSession={session} players={players} attendance={[]} evaluations={evaluations} cardTotals={[]} setTab={()=>{}}/>;
+    default:node=<HomePage role={role} nextSession={session} selectedSession={session} players={players} attendance={[]} evaluations={evaluations} cardTotals={cardTotals} setTab={()=>{}}/>;
   }
   return <VeoProvider role={role}><ApplicationShell role={role} title={titles[mode]} tab={tab} setTab={navigate} onLogout={()=>navigate('home')} error={error}>
     {interactive&&<div className="card" style={{background:'#fff6db'}}><strong>DEMO VISUAL · Datos ficticios</strong><p>Los guardados se simulan y se pierden al cerrar. Esta vista permite revisar el diseño; las pruebas reales de permisos y confirmaciones se realizan en la base de pruebas.</p>

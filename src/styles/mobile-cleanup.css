@@ -7,6 +7,9 @@
 .home-discipline-line strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-discipline-line > span { flex-shrink: 0; white-space: nowrap; }
 .home-discipline-line .discipline-sanction { color: var(--danger); font-weight: 700; }
+.home-discipline-line .discipline-sanction-action { display:inline-flex; align-items:center; justify-content:center; gap:4px; flex-shrink:0; width:auto; min-height:44px; padding:6px 10px; border:1px solid currentColor; border-radius:12px; background:var(--card,#fff); font:inherit; font-weight:700; cursor:pointer; }
+.suspension-player-balance { display:grid; gap:4px; margin:12px 0; padding:12px; background:var(--card,#fff); border:1px solid var(--line); border-radius:12px; }
+.suspension-player-balance span { font-size:.875rem; }
 .evaluation-criteria { padding-left: 20px; }
 .evaluation-criteria li { margin: 8px 0; }
 .player-search { display: grid; gap: 8px; font-size: .875rem; font-weight: 600; }

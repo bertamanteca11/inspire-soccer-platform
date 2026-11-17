@@ -1,5 +1,5 @@
 import { attendanceStats } from '../utils/attendance';
-import { loadPerformanceData } from '../lib/performance';
+import { loadPerformanceData, readPerformancePages } from '../lib/performance';
 import { playerPerformanceAverages, eligibilityReason } from '../utils/evaluationEligibility';
 import { OFFICIAL_PERFORMANCE_LABEL } from '../utils/performance';
 import { evaluationTotal } from '../utils/evaluationScores';
@@ -10,7 +10,8 @@ import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession, PlayerCardTotal, Tab } from '../utils/appTypes';
 import { buildSessionLabel } from '../utils/formatters';
 import { getCardWarnings } from '../utils/stats';
-import { Card } from '../components/ui';
+import { Card, Modal } from '../components/ui';
+import { SuspensionManager } from '../components/SuspensionManager';
 import { SessionWorkflow } from '../components/shell/SessionWorkflow';
 import { ProgressiveAlerts } from '../components/ProgressiveAlerts';
 
@@ -48,6 +49,8 @@ export function HomePage({
   const [topTrainings, setTopTrainings] = useState<TopPlayer[]>([]);
   const [suspensions, setSuspensions] = useState<any[]>([]);
   const [suspensionError, setSuspensionError] = useState('');
+  const [sanctionPlayer, setSanctionPlayer] = useState<{id:string;name:string}|null>(null);
+  const suspensionRequest = useRef(0);
 
   const [sessionCounts, setSessionCounts] = useState({ id: '', evaluated: 0, eligible: 0 });
   const performanceRequest = useRef(0);
@@ -62,7 +65,8 @@ export function HomePage({
     return () => { performanceRequest.current++; };
   }, [selectedSession?.id]);
   useEffect(() => {
-    loadSuspensions();
+    void loadSuspensions();
+    return () => { suspensionRequest.current++; };
   }, []);
 
   async function loadGlobalTops() {
@@ -81,13 +85,16 @@ export function HomePage({
   async function loadSuspensions() {
     // Opening a dashboard is a read. Disciplinary calculation remains in the
     // existing explicit card-save / evaluation-confirmation paths.
-    const { data, error } = await supabase
-      .from('active_suspensions')
-      .select('*')
-      .order('matches_remaining', { ascending: false });
-
-    setSuspensions(error ? [] : data || []);
-    setSuspensionError(error ? 'No se pudieron verificar las sanciones: '+error.message : '');
+    const request=++suspensionRequest.current;
+    try {
+      const data=await readPerformancePages<any>((a,b)=>supabase.from('active_suspensions').select('*')
+        .order('matches_remaining',{ascending:false}).order('id').range(a,b));
+      if(request!==suspensionRequest.current)return;
+      setSuspensions(data);setSuspensionError('');
+    } catch(failure) {
+      if(request!==suspensionRequest.current)return;
+      setSuspensions([]);setSuspensionError('No se pudieron verificar las sanciones: '+String(failure));
+    }
   }
 
   const activeTop = topMode === 'matches' ? topMatches : topTrainings;
@@ -144,12 +151,18 @@ export function HomePage({
           <ProgressiveAlerts items={[...disciplineAlerts].map(([key,alert])=>({key,content:
             <div className="home-discipline-line">
               <strong title={alert.name}>{alert.name}</strong>
-              {alert.cards&&<span>{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
-              {alert.sanction&&<span className="discipline-sanction">Sanción</span>}
+              {alert.cards&&<span title="Total histórico de tarjetas">{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
+              {alert.sanction&&(role==='admin'?<button type="button" className="discipline-sanction discipline-sanction-action"
+                aria-label={`Gestionar sanciones de ${alert.name}`} aria-haspopup="dialog"
+                onClick={()=>setSanctionPlayer({id:key,name:alert.name})}>Sanción<ChevronRight size={14}/></button>
+                :<span className="discipline-sanction">Sanción</span>)}
             </div>
           }))}/>
         </Card>
       )}
+      {sanctionPlayer&&role==='admin'&&<Modal title={`Sanciones de ${sanctionPlayer.name}`} onClose={()=>setSanctionPlayer(null)}>
+        <SuspensionManager role={role} playerId={sanctionPlayer.id} onChanged={loadSuspensions}/>
+      </Modal>}
 
       <Card>
         <div className="row">

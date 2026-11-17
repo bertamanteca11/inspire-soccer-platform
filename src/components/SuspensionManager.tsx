@@ -6,7 +6,7 @@ import {Card} from './ui';
 import type {Role} from '../types';
 import {workflowError} from '../utils/workflowErrors';
 
-export function SuspensionManager({role,onChanged}:{role:Role;onChanged?:()=>void|Promise<void>}) {
+export function SuspensionManager({role,onChanged,playerId}:{role:Role;onChanged?:()=>void|Promise<void>;playerId?:string}) {
   const [rows,setRows]=useState<any[]>([]),[balances,setBalances]=useState<any[]>([]);
   const [error,setError]=useState(''),[loading,setLoading]=useState(true),[pending,setPending]=useState('');
   const [notice,setNotice]=useState('');
@@ -15,17 +15,20 @@ export function SuspensionManager({role,onChanged}:{role:Role;onChanged?:()=>voi
     const generation=++request.current;setLoading(true);setError('');setRows([]);setBalances([]);
     try {
       const [suspensions,balance]=await Promise.all([
-        readPerformancePages<any>((a,b)=>supabase.from('suspensions').select('*,players(display_name)').order('created_at',{ascending:false}).order('id').range(a,b)),
+        readPerformancePages<any>((a,b)=>{
+          const query=supabase.from('suspensions').select('*,players(display_name)');
+          return (playerId?query.eq('player_id',playerId):query).order('created_at',{ascending:false}).order('id').range(a,b);
+        }),
         supabase.rpc('batch4_discipline_balances'),
       ]);
       if(generation!==request.current)return;
       if(balance.error)throw new Error(workflowError(balance.error));
       if(!Array.isArray(balance.data))throw new Error('No se han podido verificar los contadores de tarjetas.');
-      setRows(suspensions);setBalances(balance.data);
+      setRows(suspensions);setBalances(playerId?balance.data.filter((row:any)=>row.player_id===playerId):balance.data);
     }catch(failure){if(generation===request.current)setError(String(failure));}
     finally{if(generation===request.current)setLoading(false);}
   }
-  useEffect(()=>{void load();return()=>{request.current++;};},[]);
+  useEffect(()=>{void load();return()=>{request.current++;};},[playerId]);
   async function finish(row:any){
     if(role!=='admin'||busy.current||loading)return;
     const initialize=row.status==='served';
@@ -40,6 +43,10 @@ export function SuspensionManager({role,onChanged}:{role:Role;onChanged?:()=>voi
     <p>Marca una sanción como cumplida cuando se hayan cumplido todos sus partidos. Las tarjetas y las sanciones anteriores se conservan.</p>
     {notice&&<p role="status" className="save-feedback success">{notice}</p>}
     {loading?<p role="status">Cargando sanciones…</p>:error?<><p role="alert">{error}</p><button onClick={()=>void load()} disabled={!!pending}>Reintentar sanciones</button></>:<>
+      {playerId&&balances.map(row=><div className="suspension-player-balance" key={row.player_id}>
+        <strong>{row.needs_cycle_review?'Acumulación actual pendiente de revisar':`Acumulación actual: ${row.cycle_yellows} / 5 amarillas`}</strong>
+        <span>Histórico: {row.historical_yellows} amarillas · {row.historical_reds} rojas</span>
+      </div>)}
       {!active.length&&<p>No hay sanciones activas.</p>}
       {active.map(row=><div key={row.id} className="stack suspension-management-row"><strong>{row.players?.display_name || 'Jugador'}</strong><span>{row.reason || 'Sanción'} · {Math.max(0,row.matches_total-row.matches_served)} partido(s) pendiente(s)</span>
         {role==='admin'&&<button className="secondary" disabled={!!pending} onClick={()=>void finish(row)}>{pending===row.id?'Guardando…':'Marcar como cumplida'}</button>}

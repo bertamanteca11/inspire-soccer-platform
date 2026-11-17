@@ -4,7 +4,7 @@ require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f
 const fixture=require('./final.fixture.ts');
 const html='<html lang="es"><body><div id="root"></div><script type="module">import R from "/@react-refresh";R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>t=>t;window.__vite_plugin_react_preamble_installed__=true;</script><script type="module" src="/tests/final.harness.tsx"></script></body></html>';
 
-async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false,unmarkedEvaluation=false,failInitialDefaults=false,searchRoster=false,workflowRejection=null}={}){
+async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false,unmarkedEvaluation=false,failInitialDefaults=false,searchRoster=false,workflowRejection=null,failCompleteSuspension=false,secondSanction=false,otherPlayerSanction=false}={}){
   const state={writes:[],unexpected:[],errors:[],pending:0};
   const data=structuredClone({players:fixture.players,sessions:fixture.sessions,callups:fixture.calls,attendance:fixture.visits,evaluations:newEvaluation?[]:fixture.evaluations,injuries:fixture.injuries,session_standouts:fixture.standouts,cards:[],suspensions:[],active_suspensions:[],player_card_totals:[],staff_flags:[],must_win_reviews:[],veo_matches:[],veo_player_match_stats:[],veo_player_links:[],veo_import_batches:[],veo_calculated_stats:[]});
   if(staleEvaluation)data.evaluations[0].tactical_discipline=1;
@@ -13,6 +13,9 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
   if(noEligible)data.callups=data.callups.map(row=>({...row,evaluable:false}));
   if(allEligible){data.callups=data.callups.map(row=>({...row,status:'called_up',evaluable:true}));data.attendance=data.sessions.flatMap(s=>data.players.map(p=>({id:s.id+'-'+p.id,session_id:s.id,player_id:p.id,status:'present'})));}
   if(activeSanction)data.suspensions=[{id:'sanction-1',player_id:data.players[0].id,source:'yellow_accumulation',status:'active',matches_total:1,matches_served:0,reason:'Acumulación de amarillas',players:{display_name:data.players[0].display_name}}];
+  if(activeSanction)data.player_card_totals=[{player_id:data.players[0].id,display_name:data.players[0].display_name,yellow_cards:5,red_cards:0,total_cards:5}];
+  if(secondSanction)data.suspensions.push({id:'sanction-red',player_id:data.players[0].id,source:'card',status:'active',matches_total:2,matches_served:0,reason:'Roja directa',players:{display_name:data.players[0].display_name}});
+  if(otherPlayerSanction)data.suspensions.push({id:'sanction-other',player_id:data.players[1].id,source:'card',status:'active',matches_total:1,matches_served:0,reason:'Sanción de otro jugador',players:{display_name:data.players[1].display_name}});
   state.data=data;
   page.on('pageerror',error=>state.errors.push(error.message));
   await page.route('**/*',async route=>{
@@ -25,11 +28,15 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     // Every external request is answered here or aborted, never forwarded.
     if(table==='veo_status')return route.fulfill({json:{version:1,ruleVersion:'2026-j5-v1'}});
     if(table==='batch4_workflow_access')return missingWorkflow?route.fulfill({status:404,json:{code:'PGRST202',message:'Could not find the function public.batch4_workflow_access in the schema cache'}}):route.fulfill({json:role==='admin'||role==='coach'});
-    if(table==='batch4_discipline_balances')return route.fulfill({json:[{player_id:data.players[0].id,display_name:data.players[0].display_name,cycle_yellows:activeSanction&&data.suspensions[0].status==='active'?5:0,historical_yellows:5,historical_reds:0}]});
+    if(table==='batch4_discipline_balances')return route.fulfill({json:[{player_id:data.players[0].id,display_name:data.players[0].display_name,cycle_yellows:activeSanction&&data.suspensions.find(s=>s.id==='sanction-1')?.status==='active'?5:0,historical_yellows:5,historical_reds:0}]});
     if(table==='batch4_complete_suspension'){
       const body=req.postDataJSON();state.writes.push({table,body});
-      data.suspensions[0]={...data.suspensions[0],status:'served',matches_served:1,served_at:'2026-11-06T10:00:00Z'};
-      return route.fulfill({json:data.suspensions[0]});
+      if(slowWrite)await new Promise(resolve=>setTimeout(resolve,250));
+      if(failCompleteSuspension)return route.fulfill({status:403,json:{code:'42501',message:'Admin only'}});
+      const index=data.suspensions.findIndex(s=>s.id===body.p_suspension);
+      if(index<0)return route.fulfill({status:400,json:{message:'Suspension not found'}});
+      data.suspensions[index]={...data.suspensions[index],status:'served',matches_served:data.suspensions[index].matches_total,served_at:'2026-11-06T10:00:00Z'};
+      return route.fulfill({json:data.suspensions[index]});
     }
     if(table==='batch4_save_card'){
       const body=req.postDataJSON();state.writes.push({table,body});
@@ -349,6 +356,104 @@ test('Admin can mark a sanction served; new cycle is zero and historical cards r
   await page.getByText('Contadores e historial',{exact:true}).click();
   await expect(page.getByText(/0 amarillas simples en la cuenta actual/)).toContainText('5 amarillas históricas');
   expect(state.writes.filter(w=>w.table==='batch4_complete_suspension')).toHaveLength(1);
+});
+
+for(const width of [320,390,1000])test(`the home card panel marks a sanction served directly at ${width}px and retains historical cards`,async({page},info)=>{
+  await page.setViewportSize({width,height:844});
+  const state=await setup(page,{mode:'home',activeSanction:true,slowWrite:true});
+  const originals=JSON.stringify({evaluations:state.data.evaluations,attendance:state.data.attendance,callups:state.data.callups,cards:state.data.cards});
+  const open=page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true});
+  await expect(open).toBeVisible();expect((await open.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  if(width===320)await page.screenshot({path:info.outputPath('home-sanction-shortcut-320.png'),fullPage:true});
+  await open.click();
+  const dialog=page.getByRole('dialog',{name:'Sanciones de Alex eligible',exact:true});
+  await expect(dialog.getByText('Acumulación actual: 5 / 5 amarillas',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('Histórico: 5 amarillas · 0 rojas',{exact:true})).toBeVisible();
+  expect(state.writes).toEqual([]);
+  expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
+  if(width===320)await page.screenshot({path:info.outputPath('home-sanction-dialog-320.png'),fullPage:true});
+  page.once('dialog',confirmation=>confirmation.accept());
+  await dialog.getByRole('button',{name:'Marcar como cumplida',exact:true}).evaluate(button=>{button.click();button.click();});
+  await expect(dialog.getByText('Sanción marcada como cumplida.',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('Acumulación actual: 0 / 5 amarillas',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('Histórico: 5 amarillas · 0 rojas',{exact:true})).toBeVisible();
+  await expect(dialog.getByText('No hay sanciones activas.',{exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
+  await expect(open).toHaveCount(0);
+  await expect(page.locator('.home-discipline-line')).toContainText('5 🟨');
+  expect(state.writes).toEqual([{table:'batch4_complete_suspension',body:{p_suspension:'sanction-1'}}]);
+  expect(JSON.stringify({evaluations:state.data.evaluations,attendance:state.data.attendance,callups:state.data.callups,cards:state.data.cards})).toBe(originals);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('closing the home sanctions dialog or cancelling confirmation makes no change',async({page})=>{
+  const state=await setup(page,{mode:'home',activeSanction:true});
+  const open=page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true});
+  await open.click();const dialog=page.getByRole('dialog');
+  await expect(dialog.getByRole('button',{name:'Marcar como cumplida',exact:true})).toBeVisible();
+  page.once('dialog',confirmation=>confirmation.dismiss());
+  await dialog.getByRole('button',{name:'Marcar como cumplida',exact:true}).click();
+  await expect(dialog.getByText('Acumulación actual: 5 / 5 amarillas',{exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
+  await expect(open).toBeFocused();expect(state.writes).toEqual([]);expect(state.data.suspensions[0].status).toBe('active');
+});
+
+test('a rejected home sanction completion keeps the warning and never reports success',async({page})=>{
+  const state=await setup(page,{mode:'home',activeSanction:true,failCompleteSuspension:true});
+  const open=page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true});
+  await open.click();const dialog=page.getByRole('dialog');
+  page.once('dialog',confirmation=>confirmation.accept());
+  await dialog.getByRole('button',{name:'Marcar como cumplida',exact:true}).click();
+  await expect(dialog.getByRole('alert')).toBeVisible();
+  await expect(dialog.getByText('Sanción marcada como cumplida.',{exact:true})).toHaveCount(0);
+  await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
+  await expect(open).toBeVisible();expect(state.data.suspensions[0].status).toBe('active');
+  expect(state.writes).toEqual([{table:'batch4_complete_suspension',body:{p_suspension:'sanction-1'}}]);
+});
+
+test('the home sanction shortcut loads only the chosen player and never completes another player sanction',async({page})=>{
+  const state=await setup(page,{mode:'home',activeSanction:true,otherPlayerSanction:true});
+  await page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true}).click();
+  const dialog=page.getByRole('dialog');
+  await expect(dialog.getByText('Sanción de otro jugador',{exact:false})).toHaveCount(0);
+  await expect(dialog.getByRole('button',{name:'Marcar como cumplida',exact:true})).toHaveCount(1);
+  page.once('dialog',confirmation=>confirmation.accept());
+  await dialog.getByRole('button',{name:'Marcar como cumplida',exact:true}).click();
+  await expect(dialog.getByText('No hay sanciones activas.',{exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Gestionar sanciones de Bruno no convocado',exact:true})).toBeVisible();
+  expect(state.data.suspensions.find(s=>s.id==='sanction-other').status).toBe('active');
+  expect(state.writes).toHaveLength(1);
+});
+
+test('a player with two sanctions can complete the accumulation independently and keep the red-card warning',async({page})=>{
+  const state=await setup(page,{mode:'home',activeSanction:true,secondSanction:true});
+  const open=page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true});
+  await open.click();const dialog=page.getByRole('dialog');
+  await expect(dialog.getByRole('button',{name:'Marcar como cumplida',exact:true})).toHaveCount(2);
+  await expect(dialog.getByText('Roja directa · 2 partido(s) pendiente(s)',{exact:true})).toBeVisible();
+  page.once('dialog',confirmation=>confirmation.accept());
+  await dialog.locator('.suspension-management-row').filter({hasText:'Acumulación de amarillas'}).getByRole('button',{name:'Marcar como cumplida',exact:true}).click();
+  await expect(dialog.getByText('Acumulación actual: 0 / 5 amarillas',{exact:true})).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'Marcar como cumplida',exact:true})).toHaveCount(1);
+  await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();await expect(open).toBeVisible();
+  expect(state.data.suspensions.find(s=>s.id==='sanction-red').status).toBe('active');
+  expect(state.writes).toEqual([{table:'batch4_complete_suspension',body:{p_suspension:'sanction-1'}}]);
+});
+
+for(const role of ['coach','viewer'])test(`${role} sees the home sanction as read-only without the completion shortcut`,async({page})=>{
+  const state=await setup(page,{mode:'home',role,activeSanction:true});
+  await expect(page.locator('.home-discipline-line .discipline-sanction')).toHaveText('Sanción');
+  await expect(page.getByRole('button',{name:/Gestionar sanciones de/})).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);expect(state.writes).toEqual([]);
+});
+
+test('a failed player sanction read does not allow completion from the home panel',async({page})=>{
+  const state=await setup(page,{mode:'home',activeSanction:true,readDenied:'suspensions'});
+  await page.getByRole('button',{name:'Gestionar sanciones de Alex eligible',exact:true}).click();
+  const dialog=page.getByRole('dialog');await expect(dialog.getByRole('alert')).toBeVisible();
+  await expect(dialog.getByRole('button',{name:'Marcar como cumplida',exact:true})).toHaveCount(0);
+  expect(state.writes).toEqual([]);
 });
 
 test('a sanctioned match player is flagged in their row; the called-up alert follows local selection without writing',async({page})=>{
