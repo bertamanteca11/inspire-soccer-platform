@@ -6,7 +6,7 @@
     "demo": "node scripts/preview-demo.cjs",
     "demo:check": "node scripts/preview-demo.cjs --check",
     "release:sql": "node scripts/prepare-release-sql.cjs",
-    "test": "node --test tests/player-report.test.cjs tests/phase1.test.cjs tests/phase4.test.cjs tests/session-archive.test.cjs tests/evaluation-correctness.test.cjs tests/batch4.test.cjs tests/batch4-database.test.cjs tests/final-quality.test.cjs tests/release-database.test.cjs tests/release-quality.test.cjs tests/private-staff-database.test.cjs tests/veo.test.cjs tests/veo-analytics.test.cjs tests/veo-database.test.cjs",
+    "test": "node --test tests/player-report.test.cjs tests/phase1.test.cjs tests/phase4.test.cjs tests/session-archive.test.cjs tests/evaluation-correctness.test.cjs tests/batch4.test.cjs tests/batch4-database.test.cjs tests/final-quality.test.cjs tests/release-database.test.cjs tests/release-quality.test.cjs tests/private-staff-database.test.cjs tests/veo.test.cjs tests/veo-analytics.test.cjs tests/veo-database.test.cjs tests/discipline-v2-database.test.cjs tests/discipline-display.test.cjs",
     "build:check": "tsc --noEmit --incremental false && vite build --outDir .veo-build-check --emptyOutDir false",
     "test:veo-ui": "playwright test -c tests/veo.playwright.config.cjs",
     "test:phase4-ui": "playwright test -c tests/phase4.playwright.config.cjs",
@@ -16,7 +16,9 @@
     "test:batch4-ui": "playwright test -c tests/batch4.playwright.config.cjs",
     "test:final-ui": "playwright test -c tests/final.playwright.config.cjs",
     "test:staff": "node --test tests/private-staff-database.test.cjs",
-    "test:typecheck": "tsc --noEmit --incremental false"
+    "test:typecheck": "tsc --noEmit --incremental false",
+    "test:discipline": "node --test tests/discipline-v2-database.test.cjs tests/discipline-display.test.cjs",
+    "test:discipline-ui": "playwright test -c tests/discipline.playwright.config.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

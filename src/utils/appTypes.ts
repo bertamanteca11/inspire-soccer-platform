@@ -48,7 +48,8 @@ export const attendanceNeedsExplanation = ['late','justified_late','justified_ab
 
 export const cardOptions = [
   ['none', 'Sin tarjeta'],
-  ['yellow', 'Amarilla'],
-  ['double_yellow', 'Doble amarilla'],
+  ['yellow', 'Una amarilla'],
+  ['double_yellow', 'Dos amarillas · expulsión'],
   ['straight_red', 'Roja directa'],
+  ['yellow_red', 'Una amarilla + roja directa'],
 ] as const;

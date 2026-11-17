@@ -12,6 +12,8 @@ import { buildSessionLabel } from '../utils/formatters';
 import { getCardWarnings } from '../utils/stats';
 import { Card, Modal } from '../components/ui';
 import { SuspensionManager } from '../components/SuspensionManager';
+import {loadDisciplineWorkspace,type DisciplineBalance,type DisciplineWorkspace} from '../lib/discipline';
+import {isPendingSanction,sanctionRemaining} from '../utils/discipline';
 import { SessionWorkflow } from '../components/shell/SessionWorkflow';
 import { ProgressiveAlerts } from '../components/ProgressiveAlerts';
 
@@ -50,6 +52,7 @@ export function HomePage({
   const [suspensions, setSuspensions] = useState<any[]>([]);
   const [suspensionError, setSuspensionError] = useState('');
   const [sanctionPlayer, setSanctionPlayer] = useState<{id:string;name:string}|null>(null);
+  const [disciplineWorkspace,setDisciplineWorkspace]=useState<DisciplineWorkspace|null>(null);
   const suspensionRequest = useRef(0);
 
   const [sessionCounts, setSessionCounts] = useState({ id: '', evaluated: 0, eligible: 0 });
@@ -87,24 +90,35 @@ export function HomePage({
     // existing explicit card-save / evaluation-confirmation paths.
     const request=++suspensionRequest.current;
     try {
-      const data=await readPerformancePages<any>((a,b)=>supabase.from('active_suspensions').select('*')
-        .order('matches_remaining',{ascending:false}).order('id').range(a,b));
+      const [data,workspace]=await Promise.all([
+        readPerformancePages<any>((a,b)=>supabase.from('active_suspensions').select('*').order('matches_remaining',{ascending:false}).order('id').range(a,b)),
+        loadDisciplineWorkspace(),
+      ]);
       if(request!==suspensionRequest.current)return;
-      setSuspensions(data);setSuspensionError('');
+      setSuspensions(data);setDisciplineWorkspace(workspace);setSuspensionError('');
     } catch(failure) {
       if(request!==suspensionRequest.current)return;
-      setSuspensions([]);setSuspensionError('No se pudieron verificar las sanciones: '+String(failure));
+      setSuspensions([]);setDisciplineWorkspace(null);setSuspensionError('No se pudieron verificar las sanciones: '+String(failure));
     }
   }
 
   const activeTop = topMode === 'matches' ? topMatches : topTrainings;
-  const disciplineAlerts = new Map<string,{name:string;cards?:PlayerCardTotal;sanction:boolean}>();
+  const disciplineAlerts = new Map<string,{name:string;cards?:PlayerCardTotal;sanction:boolean;balance?:DisciplineBalance;pending?:string}>();
   for(const s of suspensions){
     const key=s.player_id || 'suspension-'+s.id;
     disciplineAlerts.set(key,{name:s.display_name,sanction:true});
   }
   for(const cards of cardWarnings){
     disciplineAlerts.set(cards.player_id,{name:cards.display_name,cards,sanction:disciplineAlerts.get(cards.player_id)?.sanction || false});
+  }
+  if(disciplineWorkspace){
+    for(const balance of disciplineWorkspace.balances){
+      const cases=disciplineWorkspace.cases.filter(s=>s.player_id===balance.player_id&&(isPendingSanction(s)||s.needs_review));
+      if(balance.historical_yellows||balance.historical_reds||cases.length)disciplineAlerts.set(balance.player_id,{
+        ...disciplineAlerts.get(balance.player_id),name:balance.display_name,balance,sanction:cases.length>0,
+        pending:cases.map(s=>sanctionRemaining(s)).join(' · '),
+      });
+    }
   }
 
   return (
@@ -142,25 +156,27 @@ export function HomePage({
         </div>
       </Card>
 
-      {(cardWarnings.length > 0 || suspensions.length > 0) && (
+      {disciplineAlerts.size > 0 && (
         <Card>
           <div className="row">
             <p className="kicker">Tarjetas y sanciones</p>
             <AlertTriangle size={18} />
           </div>
           <ProgressiveAlerts items={[...disciplineAlerts].map(([key,alert])=>({key,content:
-            <div className="home-discipline-line">
+            <div className={alert.balance?'home-discipline-entry':''}><div className="home-discipline-line">
               <strong title={alert.name}>{alert.name}</strong>
-              {alert.cards&&<span title="Total histórico de tarjetas">{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
-              {alert.sanction&&(role==='admin'?<button type="button" className="discipline-sanction discipline-sanction-action"
+              {alert.balance?<span title="Amarillas de liga de la cuenta actual">{alert.balance.needs_cycle_review?'Revisar':`${alert.balance.cycle_yellows} / ${alert.balance.yellow_threshold}`} 🟨</span>:alert.cards&&<span title="Total histórico de tarjetas">{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
+              {(alert.sanction||alert.balance)&&(role==='admin'||role==='coach'&&disciplineWorkspace?<button type="button" className={`discipline-sanction discipline-sanction-action${alert.sanction?'':' discipline-sanction-history'}`}
                 aria-label={`Gestionar sanciones de ${alert.name}`} aria-haspopup="dialog"
                 onClick={()=>setSanctionPlayer({id:key,name:alert.name})}>Sanción<ChevronRight size={14}/></button>
                 :<span className="discipline-sanction">Sanción</span>)}
+            </div>{alert.balance&&<small>{alert.balance.historical_yellows} amarillas en total · {alert.balance.historical_reds} expulsiones</small>}
+              {alert.pending&&<small>{alert.pending}</small>}
             </div>
           }))}/>
         </Card>
       )}
-      {sanctionPlayer&&role==='admin'&&<Modal title={`Sanciones de ${sanctionPlayer.name}`} onClose={()=>setSanctionPlayer(null)}>
+      {sanctionPlayer&&(role==='admin'||role==='coach'&&disciplineWorkspace)&&<Modal title={`Sanciones de ${sanctionPlayer.name}`} onClose={()=>setSanctionPlayer(null)}>
         <SuspensionManager role={role} playerId={sanctionPlayer.id} onChanged={loadSuspensions}/>
       </Modal>}
 

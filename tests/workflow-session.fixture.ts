@@ -48,6 +48,7 @@ export const supabase = { from: query, rpc: async (name: string, args: any) => {
     return { data: { ...session }, error: null };
   }
   if (name === 'veo_status') return { data: null, error: { code: 'PGRST202', message: 'Synthetic VEO unavailable' } };
+  if (name === 'discipline_workspace') return { data: null, error: { code: 'PGRST202', message: 'Discipline upgrade not installed in legacy fixture' } };
   throw new Error('Unexpected write RPC: ' + name);
 }, auth: {
   getSession: async () => ({ data: { session: { user: { id: 'synthetic-admin' } } }, error: null }),

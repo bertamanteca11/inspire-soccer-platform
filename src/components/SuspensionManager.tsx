@@ -1,12 +1,25 @@
 import {useEffect,useRef,useState} from 'react';
 import {supabase} from '../supabase';
 import {readPerformancePages} from '../lib/performance';
-import {completeSuspension} from '../lib/discipline';
+import {completeSuspension,loadDisciplineWorkspace,type DisciplineWorkspace} from '../lib/discipline';
+import {DisciplineManager} from './DisciplineManager';
 import {Card} from './ui';
 import type {Role} from '../types';
 import {workflowError} from '../utils/workflowErrors';
 
 export function SuspensionManager({role,onChanged,playerId}:{role:Role;onChanged?:()=>void|Promise<void>;playerId?:string}) {
+  const [workspace,setWorkspace]=useState<DisciplineWorkspace|null|undefined>(undefined),[failure,setFailure]=useState(''),[retry,setRetry]=useState(0);
+  useEffect(()=>{let cancelled=false;setWorkspace(undefined);setFailure('');
+    loadDisciplineWorkspace(playerId).then(data=>{if(!cancelled)setWorkspace(data);},error=>{if(!cancelled)setFailure(String(error));});
+    return()=>{cancelled=true;};
+  },[playerId,retry]);
+  if(failure)return <Card><p role="alert">{failure}</p><button onClick={()=>setRetry(n=>n+1)}>Reintentar sanciones</button></Card>;
+  if(workspace===undefined)return <Card><p role="status">Verificando gestión de sanciones…</p></Card>;
+  if(workspace)return <DisciplineManager role={role} initial={workspace} playerId={playerId} onChanged={onChanged}/>;
+  return <LegacySuspensionManager role={role} onChanged={onChanged} playerId={playerId}/>;
+}
+
+function LegacySuspensionManager({role,onChanged,playerId}:{role:Role;onChanged?:()=>void|Promise<void>;playerId?:string}) {
   const [rows,setRows]=useState<any[]>([]),[balances,setBalances]=useState<any[]>([]);
   const [error,setError]=useState(''),[loading,setLoading]=useState(true),[pending,setPending]=useState('');
   const [notice,setNotice]=useState('');

@@ -10,6 +10,8 @@ import { evaluationTotal } from '../utils/evaluationScores';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, HeartPulse, Plus, Search, ShieldAlert } from 'lucide-react';
 import { PlayerAvatar, avatarOptions } from '../components/PlayerAvatar';
+import {PlayerDiscipline} from '../components/PlayerDiscipline';
+import type {Role} from '../types';
 import { supabase } from '../supabase';
 import type { Player } from '../types';
 import { Card, Modal, PageTitle } from '../components/ui';
@@ -52,7 +54,7 @@ export function PlayersPage({ role = 'viewer' }: {role?: string}) {
       safe(readPerformancePages<any>((a,b)=>supabase.from('injuries').select('*').eq('player_id',player.id).order('id').range(a,b))),
       loadPerformanceData().then(data => ({ data: data.evaluations.filter(e => e.player_id === player.id), sessions:data.sessions, error: null as {message:string} | null })).catch(error => ({data: [], sessions:[] as {id:string;name:string}[], error: {message:String(error)}})),
       loadAttendanceStatistics({playerId:player.id}),
-      safe(readPerformancePages<any>((a,b)=>supabase.from('cards').select('*').eq('player_id',player.id).order('id').range(a,b))),
+      safe(readPerformancePages<any>((a,b)=>supabase.from('cards').select('*,sessions(name,session_date)').eq('player_id',player.id).order('id').range(a,b))),
       safe(loadHistoricalEvaluations(player.id)),
     ]);
     if(request!==performanceRequest.current)return;
@@ -84,7 +86,7 @@ export function PlayersPage({ role = 'viewer' }: {role?: string}) {
       {activeInjury&&<div className="profile-alert"><HeartPulse size={18}/><div><strong>Lesión activa</strong><span>{activeInjury.body_area||activeInjury.injury_type||'Lesión'} · desde {formatDate(activeInjury.start_date)}</span></div></div>}
       <div className="player-stat-grid"><Stat value={avgScore?avgScore.toFixed(2):'-'} label="Media"/><Stat value={attendanceError?'-':presentCount} label="Presentes"/><Stat value={attendanceError?'-':lateCount} label="Tardes"/><Stat value={attendanceError?'-':absentCount} label="Ausencias"/></div><p className="muted">Historial completo de asistencia, incluidas sesiones archivadas; sin corte del 14 de octubre.</p><AttendanceBreakdown rows={attendance} error={attendanceError}/>
       <section className="profile-section"><div className="section-heading"><strong>Rendimiento</strong><span>{playerEvolution.length} evaluaciones</span></div><p className="muted">{OFFICIAL_PERFORMANCE_LABEL}</p><MiniLineChart data={playerEvolution}/>{performanceError && <p role="alert">No se pudo cargar el rendimiento oficial: {performanceError}</p>}</section>
-      <section className="profile-section"><div className="section-heading"><strong>Tarjetas</strong><ShieldAlert size={17}/></div><div className="card-summary"><span><b>{cards.filter(c=>c.type==='yellow').length}</b> amarillas</span><span><b>{cards.filter(c=>['straight_red','double_yellow'].includes(c.type)).length}</b> rojas</span></div></section>
+      <PlayerDiscipline playerId={selected.id} name={selected.display_name} role={role as Role} cards={cards}/>
       <section className="profile-section"><div className="section-heading"><strong>Lesiones</strong><span>{injuries.length} registradas</span></div>{injuries.length===0?<p>No hay lesiones registradas.</p>:injuries.slice(0,8).map(i=><div className="history-line" key={i.id}><span>{formatDate(i.start_date)}</span><strong>{i.body_area||i.injury_type||'Lesión'}</strong><span>{translateInjuryStatus(i.status)}</span></div>)}</section>
       <section className="profile-section"><strong>Trayectoria y notas</strong><p className="career-copy">{selected.career_notes||'Todavía no hay notas sobre la trayectoria de este jugador.'}</p></section>
       <section className="profile-section"><h3>Comentarios por sesión</h3>{historyComments.length?historyComments.map(e=><article key={e.id}><p className="muted">{e.sessionLabel}</p><p>{e.comment}</p></article>):<p>No hay comentarios registrados.</p>}</section>

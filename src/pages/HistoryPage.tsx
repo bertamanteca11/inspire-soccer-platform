@@ -1,3 +1,4 @@
+import {cardKind} from '../utils/discipline';
 import { attendanceStats } from '../utils/attendance';
 import { loadAttendanceStatistics } from '../lib/attendance';
 import { AttendanceBreakdown } from '../components/AttendanceBreakdown';
@@ -145,7 +146,7 @@ export function HistoryPage() {
             {cards.length === 0 && <p>No hay tarjetas registradas.</p>}
             {cards.map(c => (
               <p key={c.id}>
-                <strong>{c.players?.display_name || 'Jugador'}</strong> · {translateCard(c.type)} {c.reason ? `· ${c.reason}` : ''}
+                <strong>{c.players?.display_name || 'Jugador'}</strong> · {translateCard(cardKind(c))} {c.voided_at ? ' · Registro corregido, no computa' : ''} {c.reason ? `· ${c.reason}` : ''}
               </p>
             ))}
           </Card>
@@ -155,7 +156,7 @@ export function HistoryPage() {
             {suspensions.length === 0 && <p>No hay sanciones registradas.</p>}
             {suspensions.map(s => (
               <p key={s.id}>
-                <strong>{s.players?.display_name || 'Jugador'}</strong> · {s.matches_total} partido(s) · {translateSuspension(s.status)}
+                <strong>{s.players?.display_name || 'Jugador'}</strong> · {s.matches_total==null?'Duración pendiente':`${s.matches_total} partido(s)`} · {translateSuspension(s.status)}
               </p>
             ))}
           </Card>
@@ -207,6 +208,7 @@ function translateCard(type?: string | null) {
     yellow: 'Amarilla',
     double_yellow: 'Doble amarilla',
     straight_red: 'Roja directa',
+    yellow_red: 'Una amarilla + roja directa',
   };
   return type ? map[type] || type : '-';
 }
@@ -214,6 +216,8 @@ function translateCard(type?: string | null) {
 function translateSuspension(status?: string | null) {
   const map: Record<string, string> = {
     active: 'Activa',
+    awaiting_decision: 'Pendiente de resolución',
+    partially_served: 'Parcialmente cumplida',
     served: 'Cumplida',
     cancelled: 'Cancelada',
   };

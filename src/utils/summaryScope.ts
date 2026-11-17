@@ -1,6 +1,7 @@
 import type { AttendanceRecord } from './attendance';
 import { uniqueAttendanceRecords } from './attendance';
 import { addCalendarDays, calendarDate } from './copenhagenDates';
+import {cardYellows,isDismissal} from './discipline';
 
 export type SummarySession = {
   id: string; name: string; session_date: string; status: string; type: string;
@@ -76,12 +77,13 @@ export function attendanceTrace(sessions: readonly SummarySession[], rows: reado
   });
 }
 
-export function summaryCardTotals(cards: readonly { player_id: string; type: string; players?: { display_name?: string } | null }[]) {
+export function summaryCardTotals(cards: readonly { player_id: string; type: string; discipline_kind?:string|null;voided_at?:string|null;players?: { display_name?: string } | null }[]) {
   const grouped = new Map<string, { player_id: string; display_name: string; yellow_cards: number; red_cards: number; total_cards: number }>();
   for (const card of cards) {
+    if(card.voided_at)continue;
     const total = grouped.get(card.player_id) || { player_id: card.player_id, display_name: card.players?.display_name || 'Jugador', yellow_cards: 0, red_cards: 0, total_cards: 0 };
-    total.yellow_cards += card.type === 'yellow' ? 1 : card.type === 'double_yellow' ? 2 : 0;
-    total.red_cards += ['straight_red', 'double_yellow'].includes(card.type) ? 1 : 0;
+    total.yellow_cards += cardYellows(card);
+    total.red_cards += isDismissal(card)?1:0;
     total.total_cards++;
     grouped.set(card.player_id, total);
   }

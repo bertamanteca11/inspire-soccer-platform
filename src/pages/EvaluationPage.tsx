@@ -1,5 +1,7 @@
 import { workflowAction, WorkflowActionError, type WorkflowDiagnostic } from '../lib/workflows';
-import { saveDisciplinaryCard } from '../lib/discipline';
+import { saveDisciplinaryCard,loadDisciplineWorkspace,type DisciplineWorkspace } from '../lib/discipline';
+import {cardKind,isDismissal} from '../utils/discipline';
+import {SuspensionManager} from '../components/SuspensionManager';
 import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,6 +9,7 @@ import { CheckCircle2, ChevronRight, RotateCcw, Search } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession } from '../utils/appTypes';
+import {cardOptions} from '../utils/appTypes';
 import { translatePosition, translateCard } from '../utils/formatters';
 import { getRatingCounts } from '../utils/stats';
 import { isFieldNA, evaluationTotal, fieldScore, SCORE_FIELDS } from '../utils/evaluationScores';
@@ -14,7 +17,7 @@ import { eligibilityReason, distinctRows, isSportingActivity, newEvaluationDraft
 import { readPerformancePages } from '../lib/performance';
 import { evaluationSnapshot } from '../utils/evaluationSnapshot';
 import { evaluationEditorRow, reviewedEvaluationRows, usesEvaluationDefaults } from '../utils/evaluationDefaults';
-import { Card } from '../components/ui';
+import { Card, Modal } from '../components/ui';
 import { SessionHeading } from '../components/SessionHeading';
 
 const matchRatingFields = [
@@ -46,14 +49,6 @@ const trainingRatingFields = [
     5: 'Muy competitivo, motiva a los demás',
   }],
 ] as const;
-
-const cardOptions = [
-  ['none', 'Sin tarjeta'],
-  ['yellow', 'Amarilla'],
-  ['double_yellow', 'Doble amarilla'],
-  ['straight_red', 'Roja directa'],
-] as const;
-
 
 const ALL_SCORE_FIELDS = SCORE_FIELDS;
 
@@ -88,7 +83,9 @@ export function EvaluationPage({
   const [disciplineIssue, setDisciplineIssue] = useState('');
   const cardRequest = useRef(0);
   const cardPending = useRef(false);
-  const [cardDrafts, setCardDrafts] = useState<Record<string, {type:string;reason:string;matches:string}>>({});
+  const [cardDrafts, setCardDrafts] = useState<Record<string, {type:string;reason:string;matches:string;caseRevision:number|null}>>({});
+  const [disciplineWorkspace,setDisciplineWorkspace]=useState<DisciplineWorkspace|null>(null);
+  const [sanctionPlayer,setSanctionPlayer]=useState<Player|null>(null);
   const [localEvaluations, setLocalEvaluations] = useState<Evaluation[]>(evaluations || []);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [callups, setCallups] = useState<EligibilityRow[]>([]);
@@ -157,8 +154,11 @@ export function EvaluationPage({
     const request = ++cardRequest.current;
     setCardsReady(false); setCardReadError(''); setSavedCards([]);
     try {
-      const data = await readPerformancePages<any>((a,b) => supabase.from('cards').select('*').eq('session_id', session.id).order('id').range(a,b));
-      if (request === cardRequest.current) { setSavedCards(data); setCardsReady(true); return true; }
+      const [data,workspace]=await Promise.all([
+        readPerformancePages<any>((a,b) => supabase.from('cards').select('*').eq('session_id', session.id).order('id').range(a,b)),
+        loadDisciplineWorkspace(),
+      ]);
+      if (request === cardRequest.current) { setSavedCards(data.filter(c=>!c.voided_at));setDisciplineWorkspace(workspace); setCardsReady(true); return true; }
     } catch (error) { if (request === cardRequest.current) { setCardReadError(String(error)); setError('No se pudieron verificar las tarjetas: '+String(error)); } }
     return false;
   }
@@ -186,20 +186,25 @@ export function EvaluationPage({
   const player = evaluablePlayers[index] || evaluablePlayers[0];
   const ev = localEvaluations.find((e: Evaluation) => e.player_id === player?.id);
   const existingPlayerCard = savedCards.find(c => c.player_id === player?.id);
-  const cardDraft = cardDrafts[player?.id] || {type:existingPlayerCard?.type || 'none', reason:existingPlayerCard?.reason || '', matches:'1'};
+  function savedCardDraft(playerId:string){
+    const saved=savedCards.find(c=>c.player_id===playerId);
+    const sanction=disciplineWorkspace?.cases.find(s=>s.linked_card_id===saved?.id&&s.source!=='yellow_accumulation');
+    return {type:cardKind(saved),reason:saved?.reason||'',matches:sanction?(sanction.matches_total==null?'':String(sanction.matches_total)):disciplineWorkspace?'':'1',caseRevision:sanction?.revision??null};
+  }
+  const cardDraft = cardDrafts[player?.id] || savedCardDraft(player?.id);
   const cardType = cardDraft.type;
   const cardReason = cardDraft.reason;
   const suspensionMatches = cardDraft.matches;
   function setCardDraft(playerId: string, patch: Partial<{type:string;reason:string;matches:string}>) {
     if (!cardsReady || locked || cardPending.current || confirmationPending.current) return;
-    const saved = savedCards.find(c => c.player_id === playerId);
-    setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || {type:saved?.type || 'none',reason:saved?.reason || '',matches:'1'}), ...patch}}));
+    setCardDrafts(prev => ({...prev, [playerId]: {...(prev[playerId] || savedCardDraft(playerId)), ...patch}}));
   }
   const counters = useMemo(() => getRatingCounts(distinctRows(localEvaluations).filter(e => evaluablePlayers.some(p => p.id === e.player_id))), [localEvaluations,evaluablePlayers]);
   const recordPlayers = sortPlayersByJersey(roster);
   const recordPlayer = recordPlayers[recordIndex];
   const recordCard = savedCards.find(c => c.player_id === recordPlayer?.id);
-  const recordDraft = recordPlayer ? (cardDrafts[recordPlayer.id] || {type:recordCard?.type || 'none',reason:recordCard?.reason || '',matches:'1'}) : null;
+  const recordDraft = recordPlayer ? (cardDrafts[recordPlayer.id] || savedCardDraft(recordPlayer.id)) : null;
+  const availableCardOptions=cardOptions.filter(([value])=>disciplineWorkspace||value!=='yellow_red');
 
   useEffect(() => {
     if (index >= evaluablePlayers.length) setIndex(0);
@@ -332,7 +337,8 @@ export function EvaluationPage({
       return false;
     }
     const old = existing[0];
-    if (draft.type === (old?.type || 'none') && (draft.reason || '') === (old?.reason || '')) {
+    if (draft.type === cardKind(old) && (draft.reason || '') === (old?.reason || '')
+      &&(!isDismissal({type:draft.type})||draft.matches===savedCardDraft(target.id).matches)) {
       setCardDrafts(prev => { const next = {...prev}; delete next[target.id]; return next; });
       return true;
     }
@@ -342,7 +348,7 @@ export function EvaluationPage({
     }
     // Changing a red card can affect a separate suspension record; avoid
     // silently leaving inconsistent disciplinary data.
-    if (old && ['straight_red','double_yellow'].includes(old.type) && draft.type !== old.type) {
+    if (!disciplineWorkspace&&old && ['straight_red','double_yellow'].includes(old.type) && draft.type !== old.type) {
       setError('Esta tarjeta roja ya tiene un registro. Para cambiarla, revisa también su sanción antes de editarla.');
       return false;
     }
@@ -350,7 +356,8 @@ export function EvaluationPage({
     setError('');
     try {
       // The RPC commits the card, its sanction and accumulation together.
-      await saveDisciplinaryCard(session.id,target.id,draft,old);
+      const expected=old&&disciplineWorkspace?{...old,_case_revision:draft.caseRevision}:old;
+      await saveDisciplinaryCard(session.id,target.id,draft,expected,!!disciplineWorkspace);
       if(!await loadCards())return false;
       setCardDrafts(prev => { const next = {...prev}; delete next[target.id]; return next; });
       setSavedNotice('Tarjeta guardada para ' + target.display_name);
@@ -618,13 +625,13 @@ export function EvaluationPage({
           {['friendly_match','league_match','tryout','scrimmage'].includes(session.type) && <Card>
             <strong>Tarjeta de {recordPlayer.display_name}</strong>
             <select disabled={recordSaving || editing || savingCard || !recordsReady || !cardsReady || !!disciplineIssue} value={recordDraft?.type || 'none'} onChange={e => setCardDraft(recordPlayer.id,{type:e.target.value})}>
-              {cardOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              {availableCardOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             {(recordDraft?.type || 'none') !== 'none' && <>
               <textarea disabled={recordSaving || editing || savingCard || !recordsReady} placeholder="Motivo de la tarjeta" value={recordDraft?.reason || ''} onChange={e=>setCardDraft(recordPlayer.id,{reason:e.target.value})} />
-              {['straight_red','double_yellow'].includes(recordDraft?.type || '') && <input disabled={recordSaving || editing || savingCard || !recordsReady} type="number" min="1" value={recordDraft?.matches || '1'} onChange={e=>setCardDraft(recordPlayer.id,{matches:e.target.value})} placeholder="Partidos de sanción" />}
+              {['straight_red','double_yellow','yellow_red'].includes(recordDraft?.type || '') && <label>Partidos de sanción (si se conocen)<input disabled={recordSaving || editing || savingCard || !recordsReady} type="number" min="1" max="99" value={recordDraft?.matches ?? ''} onChange={e=>setCardDraft(recordPlayer.id,{matches:e.target.value})} placeholder="Pendiente de resolución"/></label>}
             </>}
-            <p className="muted">Registrada: {savedCards.filter(c=>c.player_id===recordPlayer.id).map(c=>translateCard(c.type)).join(', ') || 'Ninguna'}</p>
+            <p className="muted">Registrada: {savedCards.filter(c=>c.player_id===recordPlayer.id).map(c=>translateCard(cardKind(c))).join(', ') || 'Ninguna'}</p>
           </Card>}
           <div className="row" style={{gap:10}}>
             <button className="secondary" disabled={recordSaving || editing || savingCard || !recordsReady} onClick={() => void saveRecordAndNavigate((recordIndex-1+recordPlayers.length)%recordPlayers.length)}>← Anterior</button>
@@ -707,29 +714,33 @@ export function EvaluationPage({
         <Card>
           <strong>Tarjetas</strong>
           <select aria-label="Tarjeta del jugador" disabled={locked || confirming || editing || savingCard || recordSaving || !cardsReady} value={cardType} onChange={e => setCardDraft(player.id, {type:e.target.value})}>
-            {cardOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            {availableCardOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
 
-          <p className="muted">Tarjeta registrada para {player.display_name}: {savedCards.filter(c=>c.player_id===player.id).map(c=>c.type==='yellow'?'🟨 Amarilla':'🟥 '+(c.type==='double_yellow'?'Doble amarilla':'Roja')).join(' · ') || 'Ninguna'}</p>
+          <p className="muted">Tarjeta registrada para {player.display_name}: {savedCards.filter(c=>c.player_id===player.id).map(c=>translateCard(cardKind(c))).join(' · ') || 'Ninguna'}</p>
           {cardType !== 'none' && (
             <>
               <textarea disabled={locked || confirming || editing || savingCard || recordSaving} placeholder="Motivo de la tarjeta..." value={cardReason} onChange={e => setCardDraft(player.id, {reason:e.target.value})} />
-              {(cardType === 'straight_red' || cardType === 'double_yellow') && (
-                <input
+              {['straight_red','double_yellow','yellow_red'].includes(cardType) && (
+                <label>Partidos de sanción (si se conocen)<input
                   disabled={locked || confirming || editing || savingCard || recordSaving}
                   type="number"
                   min="1"
-                  placeholder="Partidos de sanción"
+                  max="99"
+                  placeholder="Pendiente de resolución"
                   value={suspensionMatches}
                   onChange={e => setCardDraft(player.id, {matches:e.target.value})}
-                />
+                /></label>
               )}
             </>
           )}
           <p className="muted">{savingCard ? 'Guardando tarjeta…' : cardType === 'none' ? 'Selección guardada.' : 'La selección se guardará al pasar a otro jugador o confirmar la evaluación.'}</p>
+          {disciplineWorkspace&&<p className="muted">Si no conoces la duración, déjala vacía. La sanción quedará pendiente y podrás completar la decisión más tarde.</p>}
+          {disciplineWorkspace&&savedCards.some(c=>c.player_id===player.id&&isDismissal(c))&&<button type="button" className="secondary" disabled={savingCard||confirming} onClick={()=>setSanctionPlayer(player)}>Sanción de {player.display_name}</button>}
         </Card>
       )}
 
+      {sanctionPlayer&&<Modal title={`Sanciones de ${sanctionPlayer.display_name}`} onClose={()=>setSanctionPlayer(null)}><SuspensionManager role={role} playerId={sanctionPlayer.id} onChanged={async()=>{await loadCards();}}/></Modal>}
       <Card key={'comment-'+player.id}>
         <strong>Comentario de {player.display_name}</strong>
         <textarea disabled={locked || confirming || editing || savingCard || recordSaving} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true})); setSavedNotice('');}} aria-label={"Comentario de " + player.display_name} placeholder="Comentario individual..." />

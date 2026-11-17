@@ -3,6 +3,7 @@ import { countableEvaluations, distinctRows, isCompletedSportingSession, operati
 import { evaluationTotal, fieldScore, SCORE_FIELDS } from './evaluationScores';
 import { calendarDate, copenhagenToday } from './copenhagenDates';
 import { translateAttendance, translateCard, translateSessionType } from './formatters';
+import {cardKind,cardYellows,isDismissal,isPendingSanction,sanctionStatus} from './discipline';
 
 export type ReportRow = Record<string, any>;
 export type ReportData = {
@@ -51,9 +52,9 @@ export function buildPlayerReport(player: ReportRow, data: ReportData) {
   const classified = present + stats.absences;
   const calledIds = new Set(calls.filter(c => ['called_up','trial','guest_not_evaluable'].includes(c.status)).map(c => c.session_id));
   const missingAttendance = [...calledIds].filter(id => !attendance.some(a => a.session_id === id)).length;
-  const cards = scoped(data.cards);
-  const yellows = cards.reduce((sum,c) => sum + (c.type === 'yellow' ? 1 : c.type === 'double_yellow' ? 2 : 0),0);
-  const reds = cards.filter(c => ['straight_red','double_yellow'].includes(c.type)).length;
+  const cards = scoped(data.cards).filter(c=>!c.voided_at);
+  const yellows = cards.reduce((sum,c) => sum + cardYellows(c),0);
+  const reds = cards.filter(isDismissal).length;
   const injuryRows = distinctRows(data.injuries).filter(i => i.player_id === player.id);
   const injuries = injuryRows.filter(i => validDate(i.start_date) && i.start_date <= data.to
     && (!validDate(i.end_date) || i.end_date >= data.from)).sort((a,b) => b.start_date.localeCompare(a.start_date)).map(i => ({
@@ -71,13 +72,13 @@ export function buildPlayerReport(player: ReportRow, data: ReportData) {
     if (s.created_from_session_id) return sessionMap.has(s.created_from_session_id);
     const date = timestampDate(s.created_at);
     return !!date && date >= data.from && date <= data.to;
-  }).map(s => ({ total: Number(s.matches_total) || 0,
-    remaining: Math.max(0,(Number(s.matches_total)||0)-(Number(s.matches_served)||0)),
-    state: s.status === 'served' ? 'Cumplida' : s.status === 'active' ? 'Activa' : String(s.status || 'Sin estado'),
+  }).map(s => ({ total: s.matches_total==null?null:Number(s.matches_total),
+    remaining: s.matches_total==null||s.needs_review?null:Math.max(0,Number(s.matches_total)-Number(s.matches_served||0)),
+    state: s.needs_review?'Histórico pendiente de revisar':sanctionStatus[s.status]||String(s.status||'Sin estado'),
     date: allSessionMap.get(s.created_from_session_id)?.session_date || timestampDate(s.created_at),
   }));
-  const currentSuspensions = distinctRows(data.suspensions).filter(s => s.player_id === player.id && s.status === 'active')
-    .map(s => ({ remaining: Math.max(0,(Number(s.matches_total)||0)-(Number(s.matches_served)||0)) }));
+  const currentSuspensions = distinctRows(data.suspensions).filter(s => s.player_id === player.id && isPendingSanction(s as {status:string}))
+    .map(s => ({ remaining: s.matches_total==null||s.needs_review?null:Math.max(0,Number(s.matches_total)-Number(s.matches_served||0)) }));
   const standouts = scoped(operationalStandouts(data.standouts as any[],sessions as any[]));
   const training = performanceGroup(evaluations,'training'), match = performanceGroup(evaluations,'match');
   const avg = mean(evaluations.map(e => evaluationTotal(e)!).filter(n => n !== null));
@@ -94,6 +95,8 @@ export function buildPlayerReport(player: ReportRow, data: ReportData) {
       score: evaluationTotal(evaluations.find(e => e.session_id === s.id)),
     }));
   const warnings: string[] = [];
+  const disciplinaryReview=data.suspensions.filter(s=>s.player_id===player.id&&s.needs_review).length;
+  if(disciplinaryReview)warnings.push(`${disciplinaryReview} sanción(es) histórica(s) requieren verificar su decisión y los partidos cumplidos.`);
   if (missingAttendance) warnings.push(`${missingAttendance} convocatoria(s) sin asistencia registrada; no se cuentan como ausencias.`);
   if (stats.unrecorded + stats.unknown + stats.legacyInjured) warnings.push(`${stats.unrecorded + stats.unknown + stats.legacyInjured} registro(s) no permiten determinar presencia o ausencia.`);
   if (attendance.some((a,i) => attendance.some((b,j) => j < i && a.session_id === b.session_id))) warnings.push('Hay asistencias duplicadas: revisar los originales antes de interpretar el balance.');
@@ -115,7 +118,7 @@ export function buildPlayerReport(player: ReportRow, data: ReportData) {
   return { player, from:data.from, to:data.to, sessions, attendance:stats, present, classified,
     presenceRate:classified ? Math.round(present/classified*100) : null,
     missingAttendance,evaluations,average:avg,training,match,injuries,undatedInjuries,
-    cards:cards.map(c => ({date:sessionMap.get(c.session_id)!.session_date,label:translateCard(c.type)})),
+    cards:cards.map(c => ({date:sessionMap.get(c.session_id)!.session_date,label:translateCard(cardKind(c))})),
     yellows,reds,suspensions,currentSuspensions,incidents,comments,recent,warnings,summary,focus,
     top:standouts.filter(s => s.category === 'top').length,bottom:standouts.filter(s => s.category === 'bottom').length };
 }

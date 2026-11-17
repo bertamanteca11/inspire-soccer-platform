@@ -10,6 +10,17 @@
 .home-discipline-line .discipline-sanction-action { display:inline-flex; align-items:center; justify-content:center; gap:4px; flex-shrink:0; width:auto; min-height:44px; padding:6px 10px; border:1px solid currentColor; border-radius:12px; background:var(--card,#fff); font:inherit; font-weight:700; cursor:pointer; }
 .suspension-player-balance { display:grid; gap:4px; margin:12px 0; padding:12px; background:var(--card,#fff); border:1px solid var(--line); border-radius:12px; }
 .suspension-player-balance span { font-size:.875rem; }
+.home-discipline-entry>small { display:block; font-size:.75rem; color:var(--muted); margin:4px 0 8px; overflow-wrap:anywhere; }
+.discipline-manager { min-width:0; }
+.discipline-manager .suspension-management-row { padding:14px 0; border-bottom:1px solid var(--line); }
+.discipline-manager label { display:grid; gap:6px; min-width:0; font-size:.875rem; font-weight:600; }
+.discipline-manager input,.discipline-manager select,.discipline-manager textarea { width:100%; min-width:0; }
+.discipline-case-editor { margin:16px 0; padding:14px; background:var(--card,#fff); border:1px solid var(--line); border-radius:16px; }
+.discipline-case-editor h4 { margin:8px 0; }
+.discipline-manager .discipline-check { display:flex; align-items:flex-start; gap:10px; line-height:1.5; }
+.discipline-manager .discipline-check input { width:22px; min-width:22px; height:22px; margin:0; padding:0; flex-shrink:0; }
+.discipline-case-service,.discipline-rules { margin-top:18px; }
+.discipline-service-row { border-bottom:1px solid var(--line); padding:10px 0; overflow-wrap:anywhere; }
 .evaluation-criteria { padding-left: 20px; }
 .evaluation-criteria li { margin: 8px 0; }
 .player-search { display: grid; gap: 8px; font-size: .875rem; font-weight: 600; }
@@ -54,3 +65,4 @@
   .home-dashboard .progress-card span { font-size: .75rem; overflow-wrap: anywhere; }
   .home-dashboard .progress-card small { display: block; font-size: .75rem; }
 }
+.discipline-sanction.discipline-sanction-history {color:var(--text-secondary, #475569);background:var(--surface-muted, #f1f5f9);}

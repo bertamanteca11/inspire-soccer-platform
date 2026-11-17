@@ -122,7 +122,7 @@ export function createPlayerReportPdf(report: PlayerReport, generated = new Date
   section(doc,'05','Tarjetas y sanciones',177);
   text(doc,`${reportCount(report.yellows,'amarilla')} (la doble cuenta 2) y ${reportCount(report.reds,'expulsión','expulsiones')}.`,margin,187,width,9,1);
   text(doc,`${reportCount(report.suspensions.length,'sanción','sanciones')} con origen o fecha de registro en el periodo.`,margin,194,width,8.2,1,muted);
-  text(doc,`A fecha de generación: ${reportCount(report.currentSuspensions.length,'sanción activa','sanciones activas')}; ${reportCount(report.currentSuspensions.reduce((sum,s)=>sum+s.remaining,0),'partido pendiente','partidos pendientes')} (incluye origen anterior).`,margin,201,width,8.2,2,muted);
+  text(doc,`A fecha de generación: ${reportCount(report.currentSuspensions.length,'sanción pendiente','sanciones pendientes')}; ${reportCount(report.currentSuspensions.reduce((sum,s)=>sum+(s.remaining??0),0),'partido pendiente conocido','partidos pendientes conocidos')}; ${report.currentSuspensions.filter(s=>s.remaining===null).length} pendiente(s) de resolución/revisión.`,margin,201,width,8.2,2,muted);
 
   section(doc,'06',report.comments.length ? 'Comentarios del entrenador' : 'Últimas sesiones del jugador',215);
   if (report.comments.length) report.comments.slice(0,2).forEach((c,index) => text(doc,`${reportDate(c.date)}: ${c.text}`,margin,225+index*11,width,8.6,2));

@@ -31,7 +31,7 @@ export function translateSessionStatus(status?: string | null) {
 }
 
 export function translateCard(type?: string | null) {
-  const labels:Record<string,string>={yellow:'Amarilla',double_yellow:'Doble amarilla',straight_red:'Roja directa'};
+  const labels:Record<string,string>={yellow:'Amarilla',double_yellow:'Doble amarilla',straight_red:'Roja directa',yellow_red:'Una amarilla + roja directa'};
   return type ? labels[type] || type : 'Sin tarjeta';
 }
 

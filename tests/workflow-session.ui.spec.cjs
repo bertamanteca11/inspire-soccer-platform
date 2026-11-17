@@ -12,7 +12,7 @@ async function setup(page){
   return {unexpected,errors};
 }
 async function assertReadOnly(page,state){
-  const writes=await page.evaluate(()=>window.workflowFixture.requests.filter(r=>!['select','rpc'].includes(r.method)||r.method==='rpc'&&!['app_access','veo_status','batch4_workflow_access'].includes(r.table)));
+  const writes=await page.evaluate(()=>window.workflowFixture.requests.filter(r=>!['select','rpc'].includes(r.method)||r.method==='rpc'&&!['app_access','veo_status','batch4_workflow_access','discipline_workspace'].includes(r.table)));
   expect(writes).toEqual([]);expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 }
 test('entering Evaluation rereads a session confirmed by another Admin without writing flags or drafts',async({page})=>{

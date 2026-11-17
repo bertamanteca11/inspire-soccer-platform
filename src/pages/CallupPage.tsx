@@ -13,6 +13,7 @@ import { Card } from '../components/ui';
 import { SessionHeading } from '../components/SessionHeading';
 import { ProgressiveAlerts } from '../components/ProgressiveAlerts';
 import { SuspensionManager } from '../components/SuspensionManager';
+import {sanctionRemaining} from '../utils/discipline';
 
 type CallupRow = {
   id: string;
@@ -157,8 +158,8 @@ export function CallupPage({ role, session, reload, setError }: {
     {suspensions.length > 0 && <Card className="warning">
       <AlertTriangle size={18} />
       <div><strong>Sanciones activas (revisar según la fecha del partido)</strong>
-        <ProgressiveAlerts items={suspensions.map((s: any) => ({key:s.id,content:<p>{s.display_name}: {s.matches_remaining} partido(s)</p>}))}/>
-        {isAdmin&&<a href="#callup-sanctions">Gestionar sanciones cumplidas</a>}
+        <ProgressiveAlerts items={suspensions.map((s: any) => ({key:s.id,content:<p>{s.display_name}: {sanctionRemaining(s)}</p>}))}/>
+        {(isAdmin||role==='coach')&&<a href="#callup-sanctions">Gestionar sanciones</a>}
       </div>
     </Card>}
     {missingCount > 0 && players.some(p => drafts[p.id] === null) && <Card className="warning">
@@ -174,7 +175,7 @@ export function CallupPage({ role, session, reload, setError }: {
         {isAdmin && <button className="secondary danger" disabled={saving || !access.ready || !!access.error} onClick={reopenConvocatoria}><RotateCcw size={16} /> Reabrir convocatoria</button>}
       </div> : <button className="primary" disabled={locked || saving || players.length === 0} onClick={confirmConvocatoria}><Save size={18} /> {saving ? 'Guardando...' : 'Confirmar convocatoria'}</button>}
     </Card>
-    {isAdmin && <div id="callup-sanctions"><SuspensionManager role={role} onChanged={async()=>{
+    {(isAdmin||role==='coach') && <div id="callup-sanctions"><SuspensionManager role={role} onChanged={async()=>{
       const result=await readActiveSuspensions();
       if(result.error)setError('La sanción se guardó, pero no se pudieron actualizar los avisos. Recarga la convocatoria.');else setSuspensions(result.data);
     }}/></div>}
@@ -187,7 +188,7 @@ export function CallupPage({ role, session, reload, setError }: {
         <Card><div className="row">
           <div><strong>{player.shirt_number ? `${player.shirt_number}. ` : ''}{player.display_name}</strong><p>{translatePosition(player.position)} · {translateStatus(player.status)}</p></div>
           <button disabled={locked || saving} className={selected ? 'chip active' : 'chip'} onClick={() => void togglePlayer(player)}>{label}</button>
-        </div>{playerSuspensions.map(s=><p key={s.id} className="tiny-warning player-suspension-warning"><AlertTriangle size={16}/> Sanción activa · {s.matches_remaining} partido(s) pendiente(s). Revisa si puede participar en este partido.</p>)}</Card>
+        </div>{playerSuspensions.map(s=><p key={s.id} className="tiny-warning player-suspension-warning"><AlertTriangle size={16}/> Sanción · {sanctionRemaining(s)}. Revisa si puede participar en este partido.</p>)}</Card>
       </div>;
     })}
   </div>;

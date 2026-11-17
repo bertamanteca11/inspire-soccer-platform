@@ -27,6 +27,7 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     const table=url.pathname.split('/').pop();
     // Every external request is answered here or aborted, never forwarded.
     if(table==='veo_status')return route.fulfill({json:{version:1,ruleVersion:'2026-j5-v1'}});
+    if(table==='discipline_workspace')return route.fulfill({status:404,json:{code:'PGRST202',message:'Discipline upgrade not installed in legacy fixture'}});
     if(table==='batch4_workflow_access')return missingWorkflow?route.fulfill({status:404,json:{code:'PGRST202',message:'Could not find the function public.batch4_workflow_access in the schema cache'}}):route.fulfill({json:role==='admin'||role==='coach'});
     if(table==='batch4_discipline_balances')return route.fulfill({json:[{player_id:data.players[0].id,display_name:data.players[0].display_name,cycle_yellows:activeSanction&&data.suspensions.find(s=>s.id==='sanction-1')?.status==='active'?5:0,historical_yellows:5,historical_reds:0}]});
     if(table==='batch4_complete_suspension'){
