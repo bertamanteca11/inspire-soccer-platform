@@ -4,6 +4,92 @@ const fs=require('node:fs');
 const {createReleaseDatabase}=require('./helpers/releaseDatabase.cjs');
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const sql=f=>fs.readFileSync(f,'utf8');
+const ts=require('typescript');
+require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,f);
+const {reviewedEvaluationRows}=require('../src/utils/evaluationDefaults.ts');
+const {evaluationTotal}=require('../src/utils/evaluationScores.ts');
+
+for(const generated of [false,true])test(`evaluation finalization supports ${generated?'generated':'ordinary'} total_score without changing column definitions or sporting originals`,async t=>{
+  const db=await createReleaseDatabase(),admin=id(1),coach=id(2);
+  const reset=()=>db.exec('RESET ROLE');
+  const auth=person=>db.exec(`RESET ROLE;SELECT set_config('request.jwt.claim.sub','${person}',false);SET ROLE authenticated;`);
+  const readRows=sid=>db.query('SELECT * FROM evaluations WHERE session_id=$1 ORDER BY id',[sid]);
+  const cases=[];
+  try{
+    let schema=sql('tests/fixtures/live-schema-2026-11-06.sql');
+    if(generated){
+      const ordinary='"total_score" "pg_catalog"."numeric",';
+      assert(schema.includes(ordinary));
+      schema=schema.replace(ordinary,'"total_score" "pg_catalog"."numeric" GENERATED ALWAYS AS (round((tactical_discipline+effort_commitment+decision_making+mentality_attitude+coachability)::numeric/5,2)) STORED,');
+    }
+    await db.exec(schema);
+    for(const [person,role]of [[admin,'admin'],[coach,'coach']]){
+      await db.query('INSERT INTO auth.users VALUES($1)',[person]);
+      await db.query('INSERT INTO profiles(id,email,role) VALUES($1,$2,$3)',[person,role+'@example.test',role]);
+    }
+    const participants=[];
+    for(let i=0;i<17;i++)participants.push((await db.query("INSERT INTO players(name,display_name) VALUES('Synthetic','Synthetic') RETURNING id")).rows[0].id);
+    for(const [offset,total,stored,marker,person]of [[10,16,13,1,coach],[11,16,13,1,admin],[12,17,17,null,coach],[13,16,0,1,coach]]){
+      const sid=id(offset),session=(await db.query("INSERT INTO sessions(id,name,session_date,type,callup_confirmed,attendance_confirmed) VALUES($1,'Synthetic confirmation','2026-11-15','league_match',true,true) RETURNING *",[sid])).rows[0];
+      for(let i=0;i<total;i++){
+        await db.query("INSERT INTO callups(session_id,player_id,status,evaluable) VALUES($1,$2,'called_up',true)",[sid,participants[i]]);
+        await db.query("INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,'present')",[sid,participants[i]]);
+        if(i<stored)await db.query("INSERT INTO evaluations(session_id,player_id,coachability,comment) VALUES($1,$2,$3,'Preserved synthetic comment')",[sid,participants[i],i<3?5:3]);
+      }
+      cases.push({sid,session:{...session,draft_defaults_version:marker},total,stored,marker,person});
+    }
+    await db.exec(sql('supabase/batch4/REVIEW_INSTALL.sql'));
+    await db.exec(sql('supabase/staff/INSTALL_PRIVATE_STAFF.sql'));
+    for(const c of cases)await db.query('UPDATE sessions SET draft_defaults_version=$1 WHERE id=$2',[c.marker,c.sid]);
+    const signature='public.batch4_finalize_evaluation(uuid,uuid,jsonb,boolean)';
+    const definition=async()=>(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition.replace(/\r/g,'');
+    const metadata=async()=>(await db.query('SELECT proowner,proacl,proconfig,prosecdef,provolatile,prolang FROM pg_proc WHERE oid=$1::regprocedure',[signature])).rows[0];
+    const column=async()=>(await db.query("SELECT a.attnum,a.atttypid,a.atttypmod,a.attgenerated,a.attnotnull,pg_get_expr(d.adbin,d.adrelid) AS expression FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='public.evaluations'::regclass AND a.attname='total_score'")).rows[0];
+    const snapshot=async()=>({
+      rows:(await db.query('SELECT to_jsonb(e) AS row FROM evaluations e ORDER BY e.id')).rows,
+      sessions:(await db.query('SELECT to_jsonb(s) AS row FROM sessions s ORDER BY s.id')).rows,
+      policies:(await db.query("SELECT * FROM pg_policies WHERE schemaname='public' ORDER BY tablename,policyname")).rows,
+      triggers:(await db.query('SELECT oid,tgname,tgenabled,pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal ORDER BY oid')).rows
+    });
+    const patch=sql('supabase/batch4/FIX_EVALUATION_GENERATED_TOTAL.sql').replace(/\r/g,'');
+    const oldStatement=patch.match(/\$old\$([\s\S]*?)\$old\$/)[1],newStatement=patch.match(/\$new\$([\s\S]*?)\$new\$/)[1];
+    const canonical=await definition(),permissions=await metadata(),columnBefore=await column(),before=await snapshot();
+    assert(canonical.includes(newStatement));
+    await db.exec(canonical.replace(newStatement,oldStatement));
+    if(generated)await t.test('the previous function reproduces production SQLSTATE 428C9 and rolls back initial inserts',async()=>{
+      const c=cases[0];await auth(c.person);
+      const payload=reviewedEvaluationRows(c.session,(await readRows(c.sid)).rows,participants.slice(0,c.total));
+      await assert.rejects(db.query("SELECT batch4_workflow_action($1,'evaluation','confirm',$2::jsonb,false)",[c.sid,JSON.stringify(payload)]),error=>{
+        assert.equal(error.code,'428C9');assert.match(error.message,/total_score.*DEFAULT/);return true;
+      });
+      await reset();assert.deepEqual(await snapshot(),before);
+    });
+    await reset();
+    for(let attempt=0;attempt<2;attempt++){
+      const result=await db.exec(patch);
+      assert.equal(result.at(-1).rows[0].evaluation_total_patch.all_ok,true);
+      assert.equal(result.at(-1).rows[0].evaluation_total_patch.total_score_generated,generated);
+      assert.deepEqual(await metadata(),permissions);assert.deepEqual(await column(),columnBefore);
+      assert.deepEqual(await snapshot(),before);assert.equal(await definition(),canonical);
+    }
+    for(const c of cases)await t.test(`${c.person===coach?'Coach':'Admin'} confirms ${c.stored} saved and ${c.total-c.stored} initial scores with marker ${c.marker}`,async()=>{
+      await auth(c.person);const originals=(await readRows(c.sid)).rows;
+      const payload=reviewedEvaluationRows(c.session,originals,participants.slice(0,c.total));
+      await db.query("SELECT batch4_workflow_action($1,'evaluation','confirm',$2::jsonb,false)",[c.sid,JSON.stringify(payload)]);
+      const saved=(await readRows(c.sid)).rows;
+      assert.equal(saved.length,c.total);assert(saved.every(row=>row.evaluated&&evaluationTotal(row)===3));
+      for(const original of originals){
+        const row=saved.find(r=>r.id===original.id);
+        for(const field of ['tactical_discipline','effort_commitment','decision_making','mentality_attitude','coachability','comment','na_fields'])assert.deepEqual(row[field],original[field]);
+        assert.equal(Number(row.total_score),generated?(12+original.coachability)/5:3);
+      }
+      assert.equal((await db.query('SELECT evaluation_confirmed FROM sessions WHERE id=$1',[c.sid])).rows[0].evaluation_confirmed,true);
+      await assert.rejects(db.query("UPDATE evaluations SET comment='After closure' WHERE session_id=$1",[c.sid]),/closed/);
+      if(c.person===coach)await assert.rejects(db.query("SELECT batch4_workflow_action($1,'evaluation','reopen')",[c.sid]),/permission denied/);
+    });
+    await reset();assert.deepEqual(await column(),columnBefore);
+  }finally{await db.close();}
+});
 
 test('release SQL with exported schema, synthetic auth helpers and no production data',async t=>{
   const db=await createReleaseDatabase();const admin=id(1),coach=id(2),viewer=id(3),sid=id(10),players=[20,21,22,23].map(id);

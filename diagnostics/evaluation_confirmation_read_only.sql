@@ -28,6 +28,8 @@ WITH open_sessions AS (
   GROUP BY e.session_id,k.field
 )
 SELECT jsonb_build_object(
+  'total_score_column',(SELECT jsonb_build_object('is_generated',c.is_generated,'generation_expression',c.generation_expression)
+    FROM information_schema.columns c WHERE c.table_schema='public' AND c.table_name='evaluations' AND c.column_name='total_score'),
   'sessions',coalesce((SELECT jsonb_agg(to_jsonb(s)||jsonb_build_object(
     'evaluation_rows',(SELECT count(*) FROM evaluation_facts e WHERE e.session_id=s.id),
     'noneligible_scored_rows',coalesce((SELECT jsonb_agg(jsonb_build_object('evaluation_id',e.id,'player_id',e.player_id,

@@ -11,7 +11,7 @@ SELECT jsonb_build_object(
   ), '[]'::jsonb),
   'columns', COALESCE((
     SELECT jsonb_agg(to_jsonb(result_row)) FROM (
-      SELECT table_name,column_name,data_type,udt_schema,udt_name,is_nullable,column_default
+      SELECT table_name,column_name,data_type,udt_schema,udt_name,is_nullable,column_default,is_generated,generation_expression
       FROM information_schema.columns
       WHERE table_schema='public' AND table_name IN
         ('profiles','players','sessions','callups','attendance','evaluations','cards','suspensions','session_standouts','staff_flags','must_win_reviews')

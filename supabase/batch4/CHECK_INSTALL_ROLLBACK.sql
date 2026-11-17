@@ -124,9 +124,18 @@ BEGIN
       END IF;
     END LOOP;
     -- Preserve all original scores, comments and retired fifth-quality values.
-    UPDATE public.evaluations SET evaluated=(valid AND NOT p_records_only),
-      submitted_by=p_actor,submitted_at=now(),total_score=CASE WHEN divisor>0 THEN round(scored/divisor,2) ELSE NULL END
-      WHERE id=e.id;
+    -- Respect database-generated totals; the app calculates four-quality means.
+    IF EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a
+      WHERE a.attrelid='public.evaluations'::regclass AND a.attname='total_score'
+        AND NOT a.attisdropped AND a.attgenerated<>'') THEN
+      UPDATE public.evaluations SET evaluated=(valid AND NOT p_records_only),
+        submitted_by=p_actor,submitted_at=now()
+        WHERE id=e.id;
+    ELSE
+      UPDATE public.evaluations SET evaluated=(valid AND NOT p_records_only),
+        submitted_by=p_actor,submitted_at=now(),total_score=CASE WHEN divisor>0 THEN round(scored/divisor,2) ELSE NULL END
+        WHERE id=e.id;
+    END IF;
   END LOOP;
   -- 003 is required before this release accepts evaluation confirmations.
   -- Legacy cards in this session are reconciled in the same transaction.
