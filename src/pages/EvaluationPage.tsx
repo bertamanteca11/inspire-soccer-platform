@@ -1,6 +1,6 @@
 import { workflowAction, WorkflowActionError, type WorkflowDiagnostic } from '../lib/workflows';
 import { saveDisciplinaryCard,loadDisciplineWorkspace,type DisciplineWorkspace } from '../lib/discipline';
-import {cardKind,isDismissal} from '../utils/discipline';
+import {cardKind,isDismissal,isPendingSanction} from '../utils/discipline';
 import {SuspensionManager} from '../components/SuspensionManager';
 import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
@@ -736,7 +736,7 @@ export function EvaluationPage({
           )}
           <p className="muted">{savingCard ? 'Guardando tarjeta…' : cardType === 'none' ? 'Selección guardada.' : 'La selección se guardará al pasar a otro jugador o confirmar la evaluación.'}</p>
           {disciplineWorkspace&&<p className="muted">Si no conoces la duración, déjala vacía. La sanción quedará pendiente y podrás completar la decisión más tarde.</p>}
-          {disciplineWorkspace&&savedCards.some(c=>c.player_id===player.id&&isDismissal(c))&&<button type="button" className="secondary" disabled={savingCard||confirming} onClick={()=>setSanctionPlayer(player)}>Sanción de {player.display_name}</button>}
+          {disciplineWorkspace?.cases.some(s=>s.player_id===player.id&&isPendingSanction(s))&&<button type="button" className="secondary" disabled={savingCard||confirming} onClick={()=>setSanctionPlayer(player)}>Sanción de {player.display_name}</button>}
         </Card>
       )}
 

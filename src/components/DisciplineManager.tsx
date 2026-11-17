@@ -9,14 +9,19 @@ export function DisciplineBalanceSummary({balance}:{balance:DisciplineBalance}) 
   return <div className="suspension-player-balance">
     <strong>{balance.needs_cycle_review?`Acumulación pendiente de revisar · ${balance.cycle_yellows} confirmadas`:`${balance.cycle_yellows} / ${balance.yellow_threshold} hacia la próxima sanción`}</strong>
     <small>{balance.historical_yellows} amarillas en total histórico · {balance.historical_reds} expulsiones</small>
-    {!!balance.undecided_yellow_events&&<small>{balance.undecided_yellow_events} incidentes con acumulación pendiente de regla; sus amarillas se conservan en el histórico.</small>}
-    {balance.historical_reds>0&&<small>{balance.second_yellow_dismissals} por doble amarilla · {balance.direct_reds} rojas directas · {balance.yellow_red_dismissals} amarilla + roja directa</small>}
+    {(balance.historical_reds>0||!!balance.undecided_yellow_events)&&<details><summary>Detalle de tarjetas</summary>
+      {!!balance.undecided_yellow_events&&<p>Hay amarillas cuyo cómputo para acumulación está pendiente de confirmar.</p>}
+      {balance.historical_reds>0&&<small>{balance.second_yellow_dismissals} por doble amarilla · {balance.direct_reds} rojas directas · {balance.yellow_red_dismissals} amarilla + roja directa</small>}
+    </details>}
   </div>;
 }
 
 type Mutation=(action:string,payload:Record<string,unknown>,revision?:number)=>Promise<DisciplineWorkspace|null>;
 export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;initial:DisciplineWorkspace;playerId?:string;onChanged?:()=>void|Promise<void>}) {
-  const [data,setData]=useState(initial),[selected,setSelected]=useState<string|null>(null),[creating,setCreating]=useState(false);
+  const [data,setData]=useState(initial),[selected,setSelected]=useState<string|null>(()=>{
+    const pending=initial.cases.filter(isPendingSanction);
+    return playerId&&pending.length===1?pending[0].id:null;
+  }),[creating,setCreating]=useState(false);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const pending=useRef(false),canManage=role==='admin'||role==='coach';
   const mutate:Mutation=async(action,payload,revision)=>{
@@ -26,7 +31,7 @@ export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;i
       const result=await disciplineAction(action,payload,revision);
       let next=result;
       if(!playerId){try{next=await loadDisciplineWorkspace()||result;}catch{setError('Cambio guardado; no se pudo recargar la lista completa. Actualiza las sanciones.');}}
-      setData(next);setNotice(action==='serve_match'?'Partido cumplido registrado y verificado.':action==='revoke_match'?'Cumplimiento corregido; el registro anterior se conserva.':'Decisión guardada y verificada.');
+      setData(next);setNotice(action==='serve_match'?'Partido cumplido guardado.':action==='revoke_match'?'Cumplimiento corregido.':'Sanción guardada.');
       try{await onChanged?.();}catch{setError('Cambio guardado; recarga para actualizar los demás avisos.');}
       if(action==='save_case'){
         const saved=next.cases.find(s=>s.id===payload.id)||next.cases.find(s=>(s as any).request_key===payload.request_key);
@@ -41,33 +46,33 @@ export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;i
     try{const next=await loadDisciplineWorkspace(playerId);if(!next)throw new Error('La gestión de sanciones no está disponible.');setData(next);}
     catch(failure){setError(String(failure));}finally{setBusy(false);}
   }
-  const active=data.cases.filter(s=>isPendingSanction(s)||s.needs_review);
-  const history=data.cases.filter(s=>!isPendingSanction(s)&&!s.needs_review);
+  const active=data.cases.filter(isPendingSanction);
+  const history=data.cases.filter(s=>!isPendingSanction(s));
   const selectedCase=data.cases.find(s=>s.id===selected);
   return <Card className="discipline-manager">
-    <div className="row"><h3>Sanciones y acumulación</h3><button type="button" className="secondary" disabled={busy} onClick={()=>void refresh()}>Actualizar sanciones</button></div>
-    <p>Solo liga · {data.rules.competition_name}. Cada sanción conserva sus propios partidos cumplidos.</p>
+    {!playerId&&<h3>Sanciones pendientes</h3>}
     {notice&&<p role="status" className="save-feedback success">{notice}</p>}
     {error&&<p role="alert" className="save-feedback failure">{error}</p>}
-    {playerId&&data.balances.map(b=><DisciplineBalanceSummary key={b.player_id} balance={b}/>)}
-    {!active.length&&<p>No hay sanciones pendientes ni registros por revisar.</p>}
-    {active.map(s=><div key={s.id} className="stack suspension-management-row">
+    {!active.length&&!selectedCase&&!creating&&<p>No hay sanciones pendientes.</p>}
+    {active.filter(s=>s.id!==selected).map(s=><div key={s.id} className="stack suspension-management-row">
       <strong>{s.display_name} · {s.source==='yellow_accumulation'?'Acumulación de amarillas':s.source==='manual'?'Otra sanción':translateCard(s.source)}</strong>
-      <span>{s.needs_review?'Revisar sanción histórica':sanctionStatus[s.status]} · {sanctionRemaining(s)}</span>
+      <span>{sanctionRemaining(s)}</span>
       {s.origin_match_name&&<small>{s.origin_match_name}{s.origin_match_date?' · '+formatDate(s.origin_match_date):''}</small>}
-      {s.needs_review&&<p className="tiny-warning">El contador anterior no identifica los partidos cumplidos. No se ha corregido automáticamente.</p>}
-      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);setError('');}}>{s.needs_review?'Revisar sanción histórica':'Ver / editar sanción'}</button>}
+      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);setError('');}}>Ver / editar sanción</button>}
     </div>)}
-    {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setSelected(null);setCreating(true);setError('');}}>Añadir otra sanción</button>}
     {(creating||selectedCase)&&<CaseEditor key={creating?'new':`${selectedCase!.id}:${selectedCase!.revision}`} row={creating?undefined:selectedCase} data={data} playerId={playerId} busy={busy} mutate={mutate} onClose={()=>{setSelected(null);setCreating(false);}}/>}
-    <details><summary>Contadores e historial</summary>
-      {!playerId&&data.balances.map(b=><div key={b.player_id}><strong>{b.display_name}</strong><DisciplineBalanceSummary balance={b}/></div>)}
+    {!!history.length&&<details><summary>Sanciones anteriores ({history.length})</summary>
       {history.map(s=><div key={s.id} className="stack suspension-management-row"><strong>{s.display_name} · {sanctionStatus[s.status]}</strong><span>{s.reason}</span>
-        <small>{s.verified_matches_served} partidos verificados{s.matches_total===null?'':` / ${s.matches_total}`}</small>
-        {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);}}>Ver / editar sanción</button>}
+        {s.needs_review&&<small>Registro antiguo pendiente de revisar</small>}
+        {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);}}>{s.needs_review?'Revisar registro anterior':'Ver detalle'}</button>}
       </div>)}
+    </details>}
+    <details><summary>Más opciones</summary>
+      <button type="button" className="secondary" disabled={busy} onClick={()=>void refresh()}>Actualizar sanciones</button>
+      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setSelected(null);setCreating(true);setError('');}}>Añadir otra sanción</button>}
+      {!playerId&&<details><summary>Cuenta de amarillas</summary>{data.balances.map(b=><div key={b.player_id}><strong>{b.display_name}</strong><DisciplineBalanceSummary balance={b}/></div>)}</details>}
+      {role==='admin'&&<details><summary>Reglas de la liga</summary><RulesEditor key={data.rules.revision} rules={data.rules} busy={busy} mutate={mutate}/></details>}
     </details>
-    {role==='admin'&&<details><summary>Reglas de la liga</summary><RulesEditor key={data.rules.revision} rules={data.rules} busy={busy} mutate={mutate}/></details>}
   </Card>;
 }
 
@@ -88,35 +93,43 @@ function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase
       decision_date:decision||null,origin_session_id:origin||null,decision_notes:notes||null,review_history:review,cancelled},row?.revision);
   }
   return <section className="discipline-case-editor" aria-label="Editar sanción">
-    <div className="row"><h4>{row?'Decisión y cumplimiento':'Nueva sanción independiente'}</h4><button type="button" className="chip" disabled={busy} onClick={onClose}>Cerrar edición</button></div>
-    {row&&<p><strong>{row.display_name}</strong> · {row.origin_match_name?`${row.origin_match_name}${row.origin_match_date?' · '+formatDate(row.origin_match_date):''}`:'Origen histórico sin partido identificado'}</p>}
+    {!playerId&&<div className="row"><h4>{row?'Duración de la sanción':'Nueva sanción'}</h4><button type="button" className="chip" disabled={busy} onClick={onClose}>Cerrar edición</button></div>}
+    {row&&<p className="muted">{row.source==='yellow_accumulation'?'Acumulación de amarillas':row.source==='manual'?'Otra sanción':translateCard(row.source)}{row.origin_match_name?` · ${row.origin_match_name}${row.origin_match_date?' · '+formatDate(row.origin_match_date):''}`:''}</p>}
     <form className="stack" onSubmit={save}>
       {!row&&!playerId&&<label>Jugador<select required value={player} disabled={busy} onChange={e=>setPlayer(e.target.value)}><option value="">Seleccionar jugador</option>{data.balances.map(b=><option key={b.player_id} value={b.player_id}>{b.display_name}</option>)}</select></label>}
-      {(!row||!row.created_from_session_id)&&<label>Partido de origen (si se conoce)<select value={origin} disabled={busy} onChange={e=>setOrigin(e.target.value)}><option value="">Origen no identificado</option>{data.matches.map(m=><option key={m.id} value={m.id}>{m.name} · {formatDate(m.session_date)}</option>)}</select></label>}
-      <label>Partidos de sanción confirmados<input type="number" min="1" max="99" value={matches} disabled={busy} placeholder="Pendiente de resolución" onChange={e=>setMatches(e.target.value)}/></label>
-      <small>Déjalo vacío si todavía no se conoce la resolución oficial.</small>
+      <label>Partidos de sanción<input type="number" min="1" max="99" value={matches} disabled={busy} placeholder="Pendiente de confirmar" onChange={e=>setMatches(e.target.value)}/></label>
+      {!matches&&<small>Déjalo vacío si aún no sabes cuántos partidos son.</small>}
       <label>Aplicable desde<input type="date" value={from} disabled={busy} onChange={e=>setFrom(e.target.value)}/></label>
-      <small>Fecha oficial de aplicación. Solo se podrán verificar partidos de liga posteriores al partido de origen.</small>
-      <label>Fecha de la resolución<input type="date" value={decision} disabled={busy} onChange={e=>setDecision(e.target.value)}/></label>
-      <label>Resolución / notas<textarea value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)} placeholder="Resolución oficial, motivo o explicación de la revisión"/></label>
-      {row?.needs_review&&<label className="discipline-check"><input type="checkbox" checked={review} disabled={busy} onChange={e=>setReview(e.target.checked)}/>He revisado esta sanción histórica. Su contador será el de los partidos verificados aquí ({row.verified_matches_served}); no el contador antiguo ({row.matches_served}).</label>}
-      {row&&<label className="discipline-check"><input type="checkbox" checked={cancelled} disabled={busy} onChange={e=>setCancelled(e.target.checked)}/>Sanción cancelada por resolución / corrección</label>}
-      <button type="submit" className="primary" disabled={busy}>{busy?'Guardando…':review?'Guardar revisión histórica':'Guardar decisión'}</button>
+      {row?.needs_review&&<div className="stack discipline-legacy-review">
+        <p>Registro antiguo: {row.matches_served} partidos marcados como cumplidos, {row.verified_matches_served} con partido identificado.</p>
+        <label className="discipline-check"><input type="checkbox" checked={review} disabled={busy} onChange={e=>setReview(e.target.checked)}/>He revisado los partidos cumplidos. Usar los {row.verified_matches_served} partidos identificados.</label>
+        {review&&<label>Motivo de la revisión<textarea value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)}/></label>}
+      </div>}
+      <details><summary>Notas y otras opciones</summary><div className="stack">
+        {!review&&<label>Notas<textarea value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)}/></label>}
+        <label>Fecha de la resolución<input type="date" value={decision} disabled={busy} onChange={e=>setDecision(e.target.value)}/></label>
+        {(!row||!row.created_from_session_id)&&<label>Partido de origen (si se conoce)<select value={origin} disabled={busy} onChange={e=>setOrigin(e.target.value)}><option value="">Origen no identificado</option>{data.matches.map(m=><option key={m.id} value={m.id}>{m.name} · {formatDate(m.session_date)}</option>)}</select></label>}
+        {row&&<label className="discipline-check"><input type="checkbox" checked={cancelled} disabled={busy} onChange={e=>setCancelled(e.target.checked)}/>Cancelar esta sanción</label>}
+      </div></details>
+      <button type="submit" className="primary" disabled={busy}>{busy?'Guardando…':review?'Guardar revisión':'Guardar sanción'}</button>
     </form>
-    {row&&<div className="stack discipline-case-service"><h4>Partidos cumplidos de esta sanción</h4>
-      <p>{row.verified_matches_served} verificados · {row.matches_total===null?'Duración pendiente':`${row.matches_total} de sanción`}</p>
-      {services.map(m=><div key={m.id} className="stack discipline-service-row"><strong>{m.session_name} · {formatDate(m.session_date)}</strong><span>{m.notes}{m.revoked_at?' · Corregido / no computa':''}</span>
-        {!m.revoked_at&&<button type="button" className="secondary" disabled={busy||dirty||!serviceNotes.trim()} onClick={()=>void mutate('revoke_match',{id:row.id,service_id:m.id,notes:serviceNotes},row.revision)}>Corregir este cumplimiento</button>}
-      </div>)}
-      {(!row.applicable_from||dirty)&&<p>Guarda primero la decisión y la fecha de aplicación para registrar un cumplimiento.</p>}
-      {(row.status!=='served'||row.needs_review)&&row.status!=='cancelled'&&<>
+    {row&&<div className="stack discipline-case-service">
+      <p className="discipline-service-progress">{row.status==='cancelled'?'Sanción cancelada':row.needs_review?'Cumplimiento anterior pendiente de revisar':row.matches_total===null?`${row.verified_matches_served} partidos cumplidos · Duración pendiente`:`Cumplidos: ${row.verified_matches_served} / ${row.matches_total} · Quedan ${Math.max(0,row.matches_total-row.verified_matches_served)}`}</p>
+      {row.status==='served'&&!row.needs_review&&<strong>Sanción cumplida</strong>}
+      {(row.status!=='served'||row.needs_review)&&row.status!=='cancelled'&&<details><summary>Registrar partido cumplido</summary><div className="stack">
+        {(!row.applicable_from||dirty)&&<p>Guarda primero la sanción y su fecha de aplicación.</p>}
         <label>Partido cumplido<select value={matchId} disabled={busy||dirty||!row.applicable_from} onChange={e=>setMatchId(e.target.value)}><option value="">Seleccionar partido de liga</option>{candidates.map(m=><option key={m.id} value={m.id}>{m.name} · {formatDate(m.session_date)}{m.attendance_status?` · ${m.attendance_status}`:''}</option>)}</select></label>
-        {!candidates.length&&row.applicable_from&&<p>No hay partidos de liga elegibles sin asignar. No se usarán entrenamientos, partidos anteriores ni ausencias automáticamente.</p>}
-        <label className="discipline-check"><input type="checkbox" checked={verified} disabled={busy||dirty} onChange={e=>setVerified(e.target.checked)}/>Confirmo que el jugador no participó y que este partido cumple esta sanción.</label>
-        <label>Justificación del cumplimiento / corrección<textarea value={serviceNotes} disabled={busy} maxLength={4000} onChange={e=>setServiceNotes(e.target.value)}/></label>
-        <button type="button" className="primary" disabled={busy||dirty||!matchId||!verified||!serviceNotes.trim()} onClick={()=>void mutate('serve_match',{id:row.id,session_id:matchId,verified_not_played:verified,notes:serviceNotes},row.revision)}>Registrar partido cumplido</button>
-      </>}
-      {row.status==='served'&&!row.needs_review&&<label>Motivo para corregir un cumplimiento<textarea value={serviceNotes} disabled={busy} maxLength={4000} onChange={e=>setServiceNotes(e.target.value)}/></label>}
+        {!candidates.length&&row.applicable_from&&<p>No hay partidos de liga disponibles para esta sanción.</p>}
+        <label className="discipline-check"><input type="checkbox" checked={verified} disabled={busy||dirty} onChange={e=>setVerified(e.target.checked)}/>Confirmo que no jugó por esta sanción.</label>
+        <label>Comentario del cumplimiento<textarea value={serviceNotes} disabled={busy} maxLength={4000} onChange={e=>setServiceNotes(e.target.value)}/></label>
+        <button type="button" className="primary" disabled={busy||dirty||!matchId||!verified||!serviceNotes.trim()} onClick={()=>void mutate('serve_match',{id:row.id,session_id:matchId,verified_not_played:verified,notes:serviceNotes},row.revision)}>Guardar partido cumplido</button>
+      </div></details>}
+      {!!services.length&&<details><summary>Partidos cumplidos ({services.filter(m=>!m.revoked_at).length})</summary>
+        {services.map(m=><div key={m.id} className="stack discipline-service-row"><strong>{m.session_name} · {formatDate(m.session_date)}</strong><span>{m.notes}{m.revoked_at?' · Corregido / no computa':''}</span>
+          {!m.revoked_at&&<button type="button" className="secondary" disabled={busy||dirty||!serviceNotes.trim()} onClick={()=>void mutate('revoke_match',{id:row.id,service_id:m.id,notes:serviceNotes},row.revision)}>Corregir este cumplimiento</button>}
+        </div>)}
+        <label>Motivo para corregir un cumplimiento<textarea value={serviceNotes} disabled={busy} maxLength={4000} onChange={e=>setServiceNotes(e.target.value)}/></label>
+      </details>}
     </div>}
   </section>;
 }

@@ -113,7 +113,8 @@ export function HomePage({
   }
   if(disciplineWorkspace){
     for(const balance of disciplineWorkspace.balances){
-      const cases=disciplineWorkspace.cases.filter(s=>s.player_id===balance.player_id&&(isPendingSanction(s)||s.needs_review));
+      // Historical cards and review flags do not mean a suspension is pending.
+      const cases=disciplineWorkspace.cases.filter(s=>s.player_id===balance.player_id&&isPendingSanction(s));
       if(balance.historical_yellows||balance.historical_reds||cases.length)disciplineAlerts.set(balance.player_id,{
         ...disciplineAlerts.get(balance.player_id),name:balance.display_name,balance,sanction:cases.length>0,
         pending:cases.map(s=>sanctionRemaining(s)).join(' · '),
@@ -166,7 +167,7 @@ export function HomePage({
             <div className={alert.balance?'home-discipline-entry':''}><div className="home-discipline-line">
               <strong title={alert.name}>{alert.name}</strong>
               {alert.balance?<span title="Amarillas de liga de la cuenta actual">{alert.balance.needs_cycle_review?'Revisar':`${alert.balance.cycle_yellows} / ${alert.balance.yellow_threshold}`} 🟨</span>:alert.cards&&<span title="Total histórico de tarjetas">{alert.cards.yellow_cards} 🟨{Number(alert.cards.red_cards)>0?` · ${alert.cards.red_cards} 🟥`:''}</span>}
-              {(alert.sanction||alert.balance)&&(role==='admin'||role==='coach'&&disciplineWorkspace?<button type="button" className={`discipline-sanction discipline-sanction-action${alert.sanction?'':' discipline-sanction-history'}`}
+              {alert.sanction&&(role==='admin'||role==='coach'&&disciplineWorkspace?<button type="button" className="discipline-sanction discipline-sanction-action"
                 aria-label={`Gestionar sanciones de ${alert.name}`} aria-haspopup="dialog"
                 onClick={()=>setSanctionPlayer({id:key,name:alert.name})}>Sanción<ChevronRight size={14}/></button>
                 :<span className="discipline-sanction">Sanción</span>)}
