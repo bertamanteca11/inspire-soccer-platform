@@ -13,7 +13,7 @@ async function setup(page,{mode='attendance',coach=false,historical=false}={}) {
     }
     const table=url.pathname.split('/').pop();
     if(table==='batch4_discipline_balances')return route.fulfill({json:[]});
-    if(table==='batch4_workflow_access')return route.fulfill({json:!(coach&&mode==='callup')&&!session[`${mode==='callup'?'callup':'attendance'}_confirmed`]});
+    if(table==='batch4_workflow_access')return route.fulfill({json:!session[`${mode==='callup'?'callup':'attendance'}_confirmed`]});
     if(table==='batch4_workflow_action') {
       const body=req.postDataJSON();writes.push({table,body});
       if(body.p_workflow==='callup'&&body.p_action==='confirm')calls=body.p_rows;
@@ -34,8 +34,8 @@ async function setup(page,{mode='attendance',coach=false,historical=false}={}) {
   await page.goto(`/batch4-test?mode=${mode}${coach?'&coach':''}${historical?'&historical':''}`);
   return {writes,get attendance(){return attendance},get calls(){return calls}};
 }
-test('attendance defaults are local, complete save persists untouched guests, remount and reopen preserve choices',async({page})=>{
-  const state=await setup(page);
+for(const coach of [false,true])test(`attendance saves and confirms for ${coach?'Coach':'Admin'}, then stays closed`,async({page})=>{
+  const state=await setup(page,{coach});
   const present=page.getByRole('button',{name:'Presente',exact:true});
   await expect(present.nth(0)).toHaveAttribute('aria-pressed','true');
   await expect(present.nth(1)).toHaveAttribute('aria-pressed','true');
@@ -55,9 +55,13 @@ test('attendance defaults are local, complete save persists untouched guests, re
   await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Confirmar asistencia',exact:true}).click();
   await expect(page.getByRole('button',{name:'Asistencia cerrada',exact:true})).toBeVisible();
+  await expect(present.nth(0)).toBeDisabled();
   expect(state.writes.filter(w=>w.table==='attendance')).toHaveLength(1);
-  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Reabrir asistencia',exact:true}).click();
-  await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
+  if(coach)await expect(page.getByRole('button',{name:'Reabrir asistencia',exact:true})).toHaveCount(0);
+  else {
+    page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Reabrir asistencia',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Ausencia injustificada',exact:true}).nth(0)).toHaveAttribute('aria-pressed','true');
+  }
 });
 test('callup changes wait for confirmation and saved exclusions survive reopen',async({page})=>{
   const state=await setup(page,{mode:'callup'});
@@ -69,10 +73,21 @@ test('callup changes wait for confirmation and saved exclusions survive reopen',
   page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Reabrir convocatoria',exact:true}).click();
   await expect(page.getByRole('button',{name:'No convocado',exact:true})).toHaveCount(1);
 });
-test('Coach callups are read-only and historical gaps never default',async({page})=>{
+test('Coach edits and confirms the complete callup, and confirmation locks it across remounts',async({page})=>{
   const state=await setup(page,{mode:'callup',coach:true});
-  await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeDisabled();
-  await expect(page.getByRole('button',{name:'Convocado',exact:true}).first()).toBeDisabled();expect(state.writes).toEqual([]);
+  await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Convocado',exact:true}).first().click();expect(state.writes).toEqual([]);
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Confirmar convocatoria',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Convocatoria confirmada',exact:true})).toBeVisible();
+  expect(state.calls.find(row=>row.player_id==='p').status).toBe('not_called');
+  expect(state.writes).toHaveLength(1);
+  expect(state.writes[0].body).toMatchObject({p_workflow:'callup',p_action:'confirm',p_expected_rows:[]});
+  await expect(page.getByRole('button',{name:'No convocado',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Reabrir convocatoria',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Toggle page'}).click();await page.getByRole('button',{name:'Toggle page'}).click();
+  await expect(page.getByRole('button',{name:'Convocatoria confirmada',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'No convocado',exact:true})).toBeDisabled();
+  expect(state.writes).toHaveLength(1);
 });
 test('open attendance defaults to present without a draft marker and saves only called participants',async({page})=>{
   const state=await setup(page,{historical:true});

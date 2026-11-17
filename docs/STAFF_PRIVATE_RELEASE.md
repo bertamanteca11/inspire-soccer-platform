@@ -2,13 +2,50 @@
 
 Solicitud de Susan y aclaración de Berta: los perfiles Admin (Susan, Sergi y
 Berta) disponen de un apartado de staff privado, con convocatoria, asistencia
-y tarjetas, sin evaluaciones. La cuenta Coach que utiliza Juli conserva el
+y tarjetas, sin evaluaciones. Las cuentas con rol Coach conservan el
 trabajo con jugadores y no puede leer ni modificar staff. No se han recibido
 todavía los nuevos requisitos de VEO de Sergi.
 
 Estado: Berta ha instalado el SQL y compartido `all_ok: true` el 7 de noviembre
 de 2026. El frontend de staff está publicado junto con los ajustes de evaluación
 inicial y búsqueda de jugadores. La mejora del directorio se describe abajo.
+
+Desde el 17/11/2026, Coach también puede preparar y confirmar la convocatoria
+de jugadores. Los tres cierres quedan bloqueados tras confirmar; solo Admin
+puede reabrirlos. Véase `COACH_WORKFLOW_ACCESS.md`. Staff sigue siendo privado.
+
+## Restaurar el acceso de todas las cuentas Coach (8/11/2026)
+
+El instalador anterior aprobaba una sola cuenta Coach. La cuenta compartida
+podía entrar, pero otra cuenta con el mismo rol, como la cuenta personal de Juli,
+recibía «Esta cuenta no tiene acceso a la plataforma». El bloqueo se producía en
+`app_has_access()`, utilizado por `app_access()`, RLS y los RPC operativos; no era
+un problema de contraseña ni de la pantalla de evaluaciones.
+
+En una instalación existente, ejecutar **solo
+`supabase/staff/RESTORE_COACH_ACCESS.sql` completo como `postgres`** y comprobar
+`coach_access_patch.all_ok: true`. Después, Juli debe pulsar **Reintentar permisos**
+o volver a abrir la app. No hace falta reinstalar Staff ni desplegar el frontend.
+Berta ha ejecutado el parche en producción y compartido `all_ok: true` el
+8/11/2026: `coach_access_by_role` y `private_staff_still_admin_only` correctos.
+Queda comprobar la entrada desde el dispositivo de Juli tras reintentar permisos.
+
+El parche cambia únicamente la definición de `app_has_access()`. Cualquier
+perfil Coach obtiene los permisos operativos de su rol, incluidos asistencia,
+evaluaciones y lectura de los datos de informes, sin tener que añadir cada
+cuenta a una lista. Los Admin siguen necesitando su aprobación anterior. El
+staff privado continúa siendo exclusivo de Admin; no se cambian sus políticas
+ni RPC, tampoco los cierres, bloqueos o acciones reservadas a Admin. Para
+retirar el acceso de un Coach, un administrador debe cambiar su rol o desactivar
+su cuenta; eliminar una antigua fila de membresía no revoca el acceso por rol.
+
+Las pruebas aisladas reproducen el bloqueo con una cuenta Coach personal fuera
+de la antigua lista y comprueban su restauración, asistencia, evaluación,
+lectura para informes y denegación de staff. También verifican la idempotencia
+del parche, la conservación de datos y metadatos de seguridad, los perfiles sin
+acceso y los cambios de rol con la misma sesión de Auth. Validación local:
+179 pruebas de regresión y 6 de autenticación en navegador correctas;
+compilación de producción correcta. No se ha cambiado el frontend.
 
 ## Corrección del guardado: UPDATE requires a WHERE clause (7/11/2026)
 
@@ -90,18 +127,13 @@ cambios de permisos. Las pruebas de interfaz y base de datos comprueban el motiv
 obligatorio, persistencia al recargar/reabrir, ausencia de registros automáticos
 para los no seleccionados y sesiones con todos los miembros no convocados.
 
-## Lista de cuentas aprobadas
+## Roles y aprobación de Admin
 
-La instalación autoriza los identificadores de los perfiles Admin actuales y
-una sola cuenta Coach. Si hay un único perfil Coach, se detecta automáticamente;
-no hacen falta correos ni contraseñas. Si hay varios, la instalación se detiene
-hasta indicar el UUID de la cuenta que utiliza Juli. Los roles actuales se
-conservan. No se crean ni eliminan cuentas.
-
-Si se prepara un instalador para un proyecto concreto, se guarda como
-`supabase/staff/INSTALL_PRIVATE_STAFF.local.sql`. Esa copia lleva el UUID Coach
-comprobado, está excluida de Git y sustituye al instalador genérico en el paso 1.
-El instalador genérico y las pruebas no incluyen identificadores reales.
+La instalación autoriza los identificadores de los perfiles Admin actuales.
+Las cuentas Coach acceden por su rol, sin elegir una cuenta concreta, introducir
+UUID, correos ni contraseñas. Los roles actuales se conservan. No se crean ni
+eliminan cuentas. El instalador genérico y las pruebas no incluyen identificadores
+reales. No utilizar las antiguas copias locales que seleccionaban un solo Coach.
 
 La privacidad del staff se verifica en Supabase: hace falta estar en la lista
 autorizada y tener un perfil Admin. Coach no puede cambiar su rol ni editar la
@@ -127,10 +159,8 @@ y se concede a authenticated únicamente SELECT.
 ## Orden de publicación
 
 1. Abrir `supabase/staff/INSTALL_PRIVATE_STAFF.sql` y ejecutarlo completo en
-   SQL Editor del proyecto que utiliza la app. Con una sola cuenta Coach no
-   hay que cambiar ningún valor. Si hay varias, consultar primero
-   `diagnostics/staff_access_accounts_read_only.sql` e indicar el UUID correcto
-   en `staff_access_setup`. No compartir contraseñas. El archivo es una sola
+   SQL Editor del proyecto que utiliza la app, **solo para una instalación nueva**.
+   No hay que cambiar valores ni seleccionar una cuenta Coach. El archivo es una sola
    transacción: un error no deja una instalación parcial. No volver a ejecutar
    `batch4/REVIEW_INSTALL.sql`; ya está instalado.
 2. Ejecutar `diagnostics/private_staff_post_install_check.sql` y comprobar
@@ -142,21 +172,19 @@ y se concede a authenticated únicamente SELECT.
    el SQL, durante este intervalo.
 4. Con las cuentas reales, comprobar: los Admin ven Staff en Más; Coach
    conserva las pantallas de jugadores y evaluaciones pero no ve Staff; una
-   cuenta no aprobada no entra. Crear primero solo registros de staff que
+   cuenta sin un rol permitido o un Admin no aprobado no entra. Crear solo registros de staff que
    correspondan a la realidad.
 
 No se conecta Codex a Supabase. El SQL se instala manualmente por Berta.
 
-Si varios entrenadores conocen la contraseña de una misma cuenta Coach, la
-aplicación no puede distinguir quién la utiliza. Para que solo entre Juli,
-cambiar esa contraseña en Supabase y revocar las otras sesiones compartidas.
-No se presume que esta acción ya se haya realizado. Las cuentas individuales
-permitirían distinguir quién realizó cada cambio en el futuro.
+Si varios entrenadores comparten una cuenta Coach, la aplicación no puede
+distinguir quién la utiliza. Las cuentas individuales con rol Coach tienen
+acceso y permiten distinguir quién realiza cada cambio.
 
 ## Uso del staff
 
-- En Más → Staff, seleccionar una sesión y añadir los miembros del equipo
-  técnico en Miembros. Añadir un miembro no le crea una cuenta ni le da acceso.
+- En Más → Staff → Miembros, añadir los miembros del equipo técnico sin elegir
+  una sesión. Añadir un miembro no le crea una cuenta ni le da acceso.
 - Elegir explícitamente la convocatoria y confirmarla. En partidos aparece un
   aviso si un convocado tiene sanción activa y se exige revisar el aviso.
 - En Asistencia, los convocados sin registro guardado comienzan en Presente

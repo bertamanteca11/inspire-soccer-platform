@@ -126,7 +126,7 @@ Secuencia tras todas las aprobaciones:
 ## Smoke tests y recuperación
 
 En una sesión explícitamente de prueba: crear origen operativo, revisar y confirmar
-convocatoria Admin; comprobar Coach solo lectura; abrir asistencia sin escrituras,
+convocatoria con Admin y Coach; comprobar bloqueo tras confirmar; abrir asistencia sin escrituras,
 guardar estados y notas, confirmar sin guardado implícito y reabrir como Admin.
 Evaluar por cualidad/jugador, N/A reversible y comentarios separados; confirmar
 atómicamente y comprobar denegaciones directas cuando está cerrado/bloqueado.

@@ -202,7 +202,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'Session not found'; END IF;
   actor_role := public.batch4_actor_role();
   IF auth.uid() IS NULL OR actor_role IS NULL OR actor_role NOT IN ('admin','coach')
-    OR (wf = 'callup' AND actor_role <> 'admin') THEN
+    /* Coach callup access enabled; workflow locks still apply. */ THEN
     RAISE EXCEPTION 'Workflow permission denied' USING ERRCODE = '42501';
   END IF;
   PERFORM public.batch4_assert_global_access(sid, auth.uid());
@@ -232,7 +232,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 DECLARE s public.sessions; r text := public.batch4_actor_role();
 BEGIN
   IF auth.uid() IS NULL OR r IS NULL OR r NOT IN ('admin','coach') OR p_workflow NOT IN ('callup','attendance','evaluation')
-    OR (p_workflow = 'callup' AND r <> 'admin') THEN RETURN false; END IF;
+    /* Coach callup access enabled; workflow locks still apply. */ THEN RETURN false; END IF;
   SELECT * INTO s FROM public.sessions WHERE id = p_session;
   IF NOT FOUND THEN RETURN false; END IF;
   PERFORM public.batch4_assert_global_access(p_session, auth.uid());
@@ -255,7 +255,7 @@ BEGIN
     OR p_records_only IS NULL
     OR p_workflow IS NULL OR p_workflow NOT IN ('callup','attendance','evaluation')
     OR p_action IS NULL OR p_action NOT IN ('confirm','reopen')
-    OR (p_workflow = 'callup' AND r <> 'admin') OR (p_action = 'reopen' AND r <> 'admin') THEN
+    /* Coach callup access enabled; workflow locks still apply. */ OR (p_action = 'reopen' AND r <> 'admin') THEN
     RAISE EXCEPTION 'Workflow permission denied' USING ERRCODE = '42501';
   END IF;
   SELECT * INTO s FROM public.sessions WHERE id = p_session FOR UPDATE;

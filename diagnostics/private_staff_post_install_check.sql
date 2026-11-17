@@ -28,9 +28,10 @@ WITH private_tables(name) AS (VALUES
     NOT has_function_privilege('authenticated',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE')
     AND NOT has_function_privilege('anon',to_regprocedure('public.advance_suspensions_for_match(uuid)'),'EXECUTE') END
   UNION ALL
-  SELECT 'one_approved_coach',count(*) FILTER(WHERE p.role::text='coach')=1
-    AND count(*) FILTER(WHERE p.role::text='admin')>=1 AND bool_and(p.role::text IN ('admin','coach'))
-  FROM public.app_access_members m JOIN public.profiles p ON p.id=m.user_id
+  SELECT 'coach_access_by_role',coalesce((SELECT p.prosecdef AND p.provolatile='s'
+    AND p.proconfig=ARRAY['search_path=""']::text[]
+    AND position('p.role::text=''coach'' OR (p.role::text=''admin'' AND EXISTS(' IN p.prosrc)>0
+    FROM pg_proc p WHERE p.oid=to_regprocedure('public.app_has_access()')),false)
   UNION ALL
   SELECT 'existing_admin_accounts_approved',NOT EXISTS(SELECT 1 FROM public.profiles p WHERE p.role::text='admin'
     AND NOT EXISTS(SELECT 1 FROM public.app_access_members m WHERE m.user_id=p.id))

@@ -68,7 +68,8 @@ RLS/triggers are unchanged. Review this with the live disciplinary implementatio
   still be denied creation; no session policy is broadened.
 * Saved callup choices win, including explicit not_called and guest/trial flags.
   NULL/unknown versions and confirmed gaps stay unresolved. All toggles are local;
-  Admin confirmation sends the reviewed roster to a transaction; Coach is read-only.
+  Admin and Coach confirmation send the reviewed roster to a transaction.
+  See COACH_WORKFLOW_ACCESS.md for the reviewed upgrade of existing installations.
 * Attendance independently loads authoritative stored attendance (never treats a
   failed parent read as empty). Includes current roster and saved/called inactive
   participants. Missing referenced players and duplicates block editing/saving.

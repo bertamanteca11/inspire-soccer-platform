@@ -62,12 +62,16 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
     const action=async(wf,act,rows=[],expected)=>db.query('SELECT batch4_workflow_action($1,$2,$3,$4::jsonb,false,$5::jsonb) AS result',[sid,wf,act,JSON.stringify(rows),JSON.stringify(expected ?? (wf==='callup'?await snapshot():null))]);
     const call=[{session_id:sid,player_id:pid,status:'called_up',evaluable:true}];
     const visits=[{session_id:sid,player_id:pid,status:'present',notes:null}];
-    await t.test('Coach cannot manage callups, reopen, or generally update sessions',async()=>{
+    await t.test('Coach confirms callups through the workflow but cannot reopen or generally update sessions',async()=>{
       await auth(coach);
-      await assert.rejects(action('callup','confirm',call),/permission denied/);
-      await assert.rejects(db.query('INSERT INTO callups(session_id,player_id,status,evaluable) VALUES($1,$2,$3,true)',[sid,pid,'called_up']),/permission|policy/);
+      assert.equal((await db.query("SELECT batch4_workflow_access($1,'callup') AS allowed",[sid])).rows[0].allowed,true);
+      await action('callup','confirm',call,[]);
+      assert.equal((await db.query('SELECT callup_confirmed FROM sessions WHERE id=$1',[sid])).rows[0].callup_confirmed,true);
+      await assert.rejects(action('callup','reopen'),/permission denied/);
+      await assert.rejects(db.query('INSERT INTO callups(session_id,player_id,status,evaluable) VALUES($1,$2,$3,true)',[sid,pid,'called_up']),/permission|policy|closed/);
       assert.equal((await db.query('UPDATE sessions SET evaluation_confirmed=true WHERE id=$1 RETURNING id',[sid])).rows.length,0);
       await assert.rejects(action('attendance','reopen'),/permission denied/);
+      await auth(admin);await action('callup','reopen');
     });
     await t.test('callup confirmation is atomic, saved exclusion survives admin reopen',async()=>{
       await auth(admin); await action('callup','confirm',call);

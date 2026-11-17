@@ -24,7 +24,7 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     const table=url.pathname.split('/').pop();
     // Every external request is answered here or aborted, never forwarded.
     if(table==='veo_status')return route.fulfill({json:{version:1,ruleVersion:'2026-j5-v1'}});
-    if(table==='batch4_workflow_access')return missingWorkflow?route.fulfill({status:404,json:{code:'PGRST202',message:'Could not find the function public.batch4_workflow_access in the schema cache'}}):route.fulfill({json:role==='admin'||role==='coach'&&req.postDataJSON().p_workflow!=='callup'});
+    if(table==='batch4_workflow_access')return missingWorkflow?route.fulfill({status:404,json:{code:'PGRST202',message:'Could not find the function public.batch4_workflow_access in the schema cache'}}):route.fulfill({json:role==='admin'||role==='coach'});
     if(table==='batch4_discipline_balances')return route.fulfill({json:[{player_id:data.players[0].id,display_name:data.players[0].display_name,cycle_yellows:activeSanction&&data.suspensions[0].status==='active'?5:0,historical_yellows:5,historical_reds:0}]});
     if(table==='batch4_complete_suspension'){
       const body=req.postDataJSON();state.writes.push({table,body});
@@ -168,8 +168,8 @@ test('rapid score clicks cannot insert duplicate evaluations or confirm an in-fl
   expect(state.writes.filter(w=>w.table==='evaluations'&&w.method==='PATCH')).toHaveLength(1);
 });
 
-test('new operational evaluation starts at 3 without writes and confirms untouched defaults explicitly',async({page})=>{
-  const state=await setup(page,{mode:'evaluation',newEvaluation:true});
+for(const role of ['admin','coach'])test(`${role} confirms an evaluation with the four default 3s and then cannot edit its scores`,async({page})=>{
+  const state=await setup(page,{mode:'evaluation',role,newEvaluation:true});
   await expect(page.getByRole('button',{name:'3',exact:true})).toHaveClass(/active/);
   await page.getByLabel('Cualidad que estás evaluando').selectOption('3');
   await expect(page.getByRole('button',{name:'3',exact:true})).toHaveClass(/active/);expect(state.writes).toEqual([]);
@@ -178,6 +178,8 @@ test('new operational evaluation starts at 3 without writes and confirms untouch
   expect(state.writes).toHaveLength(1);
   const row=state.writes[0].body.p_rows[0];expect(row.id).toBeNull();expect(row.evaluated).toBe(false);
   for(const field of ['tactical_discipline','effort_commitment','decision_making','mentality_attitude']){expect(row[field]).toBe(3);expect(row.na_fields[field]).toBe(false);}
+  await expect(page.getByRole('button',{name:'3',exact:true})).toBeDisabled();
+  if(role==='coach')await expect(page.getByRole('button',{name:'Reabrir evaluación',exact:true})).toHaveCount(0);
 });
 
 test('explicit N/A overrides the initial 3 and is preserved while switching qualities',async({page})=>{
@@ -192,8 +194,8 @@ test('explicit N/A overrides the initial 3 and is preserved while switching qual
   expect(state.data.evaluations[0].na_fields.tactical_discipline).toBe(true);expect(state.data.evaluations[0].na_fields.effort_commitment).toBe(false);
 });
 
-test('an existing unmarked session shows 3 and explicitly saves its defaults before the installed confirmation RPC',async({page})=>{
-  const state=await setup(page,{mode:'evaluation',newEvaluation:true,unmarkedEvaluation:true,allEligible:true});
+for(const role of ['admin','coach'])test(`${role} confirms an existing unmarked session after explicitly saving its initial scores`,async({page})=>{
+  const state=await setup(page,{mode:'evaluation',role,newEvaluation:true,unmarkedEvaluation:true,allEligible:true});
   await expect(page.locator('.rating-player-row')).toHaveCount(5);
   for(const button of await page.getByRole('button',{name:'3',exact:true}).all())await expect(button).toHaveClass(/active/);
   expect(state.writes).toEqual([]);
@@ -369,8 +371,10 @@ test('Coach sees the match sanction alert but cannot mark a sanction served',asy
   expect(state.writes).toEqual([]);
 });
 
-for(const role of ['coach','viewer'])test(`${role} cannot edit callups or view private intelligence`,async({page})=>{
-  const state=await setup(page,{mode:'callup',role});await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeDisabled();
+for(const role of ['coach','viewer'])test(`${role} callup permissions are respected and private intelligence remains inaccessible`,async({page})=>{
+  const state=await setup(page,{mode:'callup',role});
+  if(role==='coach')await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeEnabled();
+  else await expect(page.getByRole('button',{name:'Confirmar convocatoria',exact:true})).toBeDisabled();
   await expect(page.getByRole('heading',{name:'Convocatoria confirmada',exact:true})).toHaveCount(0);expect(state.writes).toEqual([]);
   await page.goto('/final-test?mode=intelligence&role='+role);await expect(page.getByText('Solo administradores',{exact:true})).toBeVisible();
   await expect(page.getByText('Notas privadas del cuerpo técnico',{exact:true})).toHaveCount(0);

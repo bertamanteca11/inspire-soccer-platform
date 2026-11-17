@@ -33,7 +33,7 @@ async function main(){
       const body=req.method()==='GET'||req.method()==='DELETE'?null:req.postDataJSON();
       if(table==='veo_status')return route.fulfill({json:{version:1,ruleVersion:'2026-j5-v1'}});
       const referer=new URL(req.headers().referer||origin);const role=referer.searchParams.get('role')||'admin';
-      if(table==='batch4_workflow_access')return route.fulfill({json:role==='admin'||role==='coach'&&body.p_workflow!=='callup'});
+      if(table==='batch4_workflow_access')return route.fulfill({json:role==='admin'||role==='coach'});
       if(table==='batch4_discipline_balances')return route.fulfill({json:data.players.map(player=>({player_id:player.id,display_name:player.display_name,cycle_yellows:Math.max(0,simpleYellows(player.id)-(baselines.get(player.id)||0)),historical_yellows:simpleYellows(player.id)+2*data.cards.filter(row=>row.player_id===player.id&&row.type==='double_yellow').length,historical_reds:data.cards.filter(row=>row.player_id===player.id&&['double_yellow','straight_red'].includes(row.type)).length}))});
       if(table==='batch4_complete_suspension'||table==='batch4_initialize_discipline_cycle'){
         const row=data.suspensions.find(item=>item.id===body.p_suspension);

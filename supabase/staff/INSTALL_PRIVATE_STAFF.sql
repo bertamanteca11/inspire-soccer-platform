@@ -2,23 +2,9 @@
 -- Admin profiles can see private staff; Coach cannot. No email/password required.
 -- No account/password creation, no sporting-record repair, no automatic deployment.
 BEGIN;
--- Leave NULL when there is only one Coach profile (the shared Coach login).
--- If several Coach profiles exist, enter ONLY Juli's verified profile UUID here.
-CREATE TEMP TABLE staff_access_setup(coach_user_id uuid) ON COMMIT DROP;
-INSERT INTO staff_access_setup VALUES (NULL);
-
 DO $$ BEGIN
   IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE role::text='admin') THEN
     RAISE EXCEPTION 'No hay perfiles Admin existentes. Revisa el proyecto antes de continuar';
-  END IF;
-  IF (SELECT coach_user_id FROM staff_access_setup) IS NULL THEN
-    IF (SELECT count(*) FROM public.profiles WHERE role::text='coach')<>1 THEN
-      RAISE EXCEPTION 'Debe haber una única cuenta Coach. Si hay varias, consulta staff_access_accounts_read_only.sql e indica solo el UUID de Juli al principio de este archivo';
-    END IF;
-    UPDATE staff_access_setup SET coach_user_id=(SELECT id FROM public.profiles WHERE role::text='coach') WHERE coach_user_id IS NULL;
-  END IF;
-  IF NOT EXISTS(SELECT 1 FROM public.profiles p JOIN staff_access_setup s ON s.coach_user_id=p.id WHERE p.role::text='coach') THEN
-    RAISE EXCEPTION 'El identificador elegido no corresponde a una cuenta Coach existente';
   END IF;
   IF to_regprocedure('public.batch4_actor_role()') IS NULL THEN
     RAISE EXCEPTION 'Instala primero REVIEW_INSTALL.sql de Batch 4';
@@ -29,13 +15,15 @@ CREATE TABLE public.app_access_members(
   user_id uuid PRIMARY KEY REFERENCES public.profiles(id)
 );
 INSERT INTO public.app_access_members
-SELECT id FROM public.profiles WHERE role::text='admin' OR id=(SELECT coach_user_id FROM staff_access_setup);
+SELECT id FROM public.profiles WHERE role::text='admin';
 ALTER TABLE public.app_access_members ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.app_access_members FROM PUBLIC,anon,authenticated;
 
 CREATE FUNCTION public.app_has_access() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
-  SELECT EXISTS(SELECT 1 FROM public.app_access_members m JOIN public.profiles p ON p.id=m.user_id
-    WHERE m.user_id=auth.uid() AND p.role::text IN ('admin','coach'))
+  -- Coach access follows the profile role; Admin still requires approval.
+  SELECT EXISTS(SELECT 1 FROM public.profiles p WHERE p.id=auth.uid() AND (
+    p.role::text='coach' OR (p.role::text='admin' AND EXISTS(
+      SELECT 1 FROM public.app_access_members m WHERE m.user_id=p.id))))
 $$;
 CREATE FUNCTION public.app_private_staff_access() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
   SELECT public.app_has_access() AND EXISTS(SELECT 1 FROM public.profiles WHERE id=auth.uid() AND role::text='admin')

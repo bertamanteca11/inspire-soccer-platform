@@ -48,6 +48,22 @@ test('membership denial blocks an existing account before any sporting queries',
   expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
+test('a previously denied Coach can retry permissions with the same login and regain normal navigation without private Staff',async({page})=>{
+  const state=await setup(page);
+  await page.evaluate(()=>window.authFixture.deny('A'));
+  await expect(page.getByRole('alert')).toContainText('no tiene acceso');
+  await page.getByRole('button',{name:'Reintentar permisos',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.authFixture.pending())).toContain('A');
+  await page.evaluate(()=>window.authFixture.resolve('A','coach',false));
+  await expect(page.getByRole('heading',{level:1})).toHaveText('Asistencia');
+  const nav=page.getByRole('navigation',{name:'Navegación principal',exact:true});
+  for(const name of ['Equipo','Sesiones','Asistencia','Evaluar','Informes'])await expect(nav.getByRole('button',{name,exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Staff',exact:true})).toHaveCount(0);
+  await nav.getByRole('button',{name:'Evaluar',exact:true}).click();
+  await expect(page.getByRole('heading',{level:1})).toHaveText('Evaluación');
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
+
 test('staff visibility uses a private capability and disappears on account change or access revocation',async({page})=>{
   const state=await setup(page);
   await page.evaluate(()=>window.authFixture.resolve('A','admin',true));

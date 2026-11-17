@@ -12,7 +12,7 @@ test('staff UPDATE statements have explicit predicates required by pg-safeupdate
 });
 
 test('private staff and membership restrictions against the exported schema and synthetic identities',async t=>{
-  const db=await createReleaseDatabase();const susan=id(1),sergi=id(2),juli=id(3),outsider=id(4),sid=id(10),otherSid=id(11);
+  const db=await createReleaseDatabase();const susan=id(1),sergi=id(2),juli=id(3),outsider=id(4),personalCoach=id(5),sid=id(10),otherSid=id(11);
   const rawQuery=db.query.bind(db);let isolate=false;
   db.query=async(...args)=>{
     if(!isolate)return rawQuery(...args);
@@ -28,14 +28,10 @@ test('private staff and membership restrictions against the exported schema and 
     return (await db.query('SELECT private_staff_action($1,$2,$3::jsonb,$4) AS data',[session,name,JSON.stringify(payload),version])).rows[0].data;
   };
   const isolated=async body=>{await privileged();await db.exec('BEGIN');isolate=true;try{await body();}finally{isolate=false;await db.exec('ROLLBACK');}};
-  const configured=(coach=null)=>read('supabase/staff/INSTALL_PRIVATE_STAFF.sql').replace(
-    'INSERT INTO staff_access_setup VALUES (NULL);',
-    `INSERT INTO staff_access_setup VALUES (${coach ? "'"+coach+"'::uuid" : 'NULL'});`
-  );
   try{
     await db.exec(read('tests/fixtures/live-schema-2026-11-06.sql'));
     await db.exec('ALTER TABLE auth.users ADD email text,ADD email_confirmed_at timestamptz;');
-    for(const [person,label,role]of [[susan,'susan','admin'],[sergi,'sergi','admin'],[juli,'juli','coach'],[outsider,'outsider','viewer']]){
+    for(const [person,label,role]of [[susan,'susan','admin'],[sergi,'sergi','admin'],[juli,'juli','coach'],[personalCoach,'personal-coach','coach'],[outsider,'outsider','viewer']]){
       await db.query('INSERT INTO auth.users VALUES($1,$2,now())',[person,label+'@example.test']);
       await db.query('INSERT INTO profiles(id,email,full_name,role) VALUES($1,$2,$3,$4)',[person,label+'@example.test',label,role]);
     }
@@ -56,25 +52,20 @@ test('private staff and membership restrictions against the exported schema and 
     const legacyViews=['session_evaluation_summary','player_overview','active_player_injuries'];
     for(const name of legacyViews)await db.exec(`CREATE VIEW public.${name} AS SELECT id,name FROM public.players;GRANT ALL ON public.${name} TO PUBLIC,anon,authenticated;`);
     const viewDefinitions=(await db.query("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY($1) ORDER BY viewname",[legacyViews])).rows;
-    await t.test('ambiguous shared Coach setup aborts atomically instead of granting every coach access',async()=>{
-      await db.query("UPDATE profiles SET role='coach' WHERE id=$1",[outsider]);
-      await assert.rejects(db.exec(configured()),/una \u00fanica cuenta Coach/);
-      await db.exec('ROLLBACK');
-      assert.equal((await db.query("SELECT to_regclass('public.app_access_members') AS table_name")).rows[0].table_name,null);
-    });
     await t.test('other unknown definer RPCs still abort and roll back the entire installer',async()=>{
       await db.exec('CREATE FUNCTION public.validation_only_unreviewed_rpc() RETURNS boolean LANGUAGE sql SECURITY DEFINER AS $$ SELECT true $$;');
-      await assert.rejects(db.exec(configured(juli)),/Revisar RPC adicionales.*validation_only_unreviewed_rpc/);
+      await assert.rejects(db.exec(read('supabase/staff/INSTALL_PRIVATE_STAFF.sql')),/Revisar RPC adicionales.*validation_only_unreviewed_rpc/);
       await db.exec('ROLLBACK');
       assert.equal((await db.query("SELECT to_regclass('public.app_access_members') AS name")).rows[0].name,null);
       assert.equal((await db.query("SELECT has_function_privilege('anon','public.advance_suspensions_for_match(uuid)','EXECUTE') AS allowed")).rows[0].allowed,true);
       await db.exec('DROP FUNCTION public.validation_only_unreviewed_rpc();');
     });
-    await db.exec(configured(juli));
+    // Multiple Coach profiles must install without choosing a single login.
+    await db.exec(read('supabase/staff/INSTALL_PRIVATE_STAFF.sql'));
     await t.test('legacy view definitions remain intact while invoker RLS excludes unapproved accounts',async()=>{
       await privileged();
       assert.deepEqual((await db.query("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY($1) ORDER BY viewname",[legacyViews])).rows,viewDefinitions);
-      for(const person of [susan,juli,outsider,null]){
+      for(const person of [susan,juli,personalCoach,outsider,null]){
         await auth(person);
         for(const name of legacyViews){
           if(!person){await assert.rejects(db.query('SELECT * FROM '+name),/permission denied/);continue;}
@@ -94,18 +85,97 @@ test('private staff and membership restrictions against the exported schema and 
       }
       await privileged();
     });
-    await t.test('explicit shared Coach selection approves that account and excludes the other Coach',async()=>{
-      await auth(juli);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,true);
+    await t.test('shared and personal Coach accounts enter by profile role without membership entries',async()=>{
+      for(const person of [juli,personalCoach]){
+        await auth(person);assert.deepEqual((await db.query('SELECT app_access() AS data')).rows[0].data,
+          {allowed:true,role:'coach',private_staff:false});
+      }
       await auth(outsider);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,false);
       await privileged();
       const approved=(await db.query("SELECT m.user_id FROM app_access_members m JOIN profiles p ON p.id=m.user_id WHERE p.role::text='coach'")).rows;
-      assert.deepEqual(approved,[{user_id:juli}]);
+      assert.deepEqual(approved,[]);
     });
     await t.test('post-install diagnostic verifies every new privacy and installation check',async()=>{
       const result=(await db.query(read('diagnostics/private_staff_post_install_check.sql'))).rows[0].private_staff_check;
       assert.equal(result.all_ok,true,JSON.stringify(result));
     });
     await db.query("UPDATE profiles SET role='admin' WHERE id=$1",[outsider]);
+    await t.test('Coach hotfix reproduces the excluded personal login and restores it without changing data or security metadata',async()=>{
+      await privileged();
+      const signature='public.app_has_access()';
+      const definition=async()=>(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS body',[signature])).rows[0].body;
+      const metadata=async()=>(await db.query('SELECT proowner,proacl,prosecdef,proconfig,provolatile,prolang FROM pg_proc WHERE oid=$1::regprocedure',[signature])).rows[0];
+      const tables=['profiles','app_access_members','sessions','callups','attendance','evaluations','cards','suspensions','private_staff_control','private_staff_members'];
+      const snapshot=()=>Promise.all(tables.map(async table=>(await db.query('SELECT to_jsonb(t) AS row FROM '+table+' t ORDER BY to_jsonb(t)::text')).rows));
+      await db.query('INSERT INTO app_access_members VALUES($1)',[juli]);
+      const before=await snapshot(),permissions=await metadata(),canonical=await definition();
+      await db.exec(`CREATE OR REPLACE FUNCTION public.app_has_access() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+        SELECT EXISTS(SELECT 1 FROM public.app_access_members m JOIN public.profiles p ON p.id=m.user_id
+          WHERE m.user_id=auth.uid() AND p.role::text IN ('admin','coach'))
+      $$;`);
+      await auth(juli);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,true);
+      await auth(personalCoach);assert.deepEqual((await db.query('SELECT app_access() AS data')).rows[0].data,{allowed:false,role:null,private_staff:false});
+      await privileged();
+      assert.equal((await db.query(read('diagnostics/private_staff_post_install_check.sql'))).rows[0].private_staff_check.checks.coach_access_by_role,false);
+      for(let attempt=0;attempt<2;attempt++){
+        const result=await db.exec(read('supabase/staff/RESTORE_COACH_ACCESS.sql'));
+        assert.equal(result.at(-1).rows[0].coach_access_patch.all_ok,true);
+        assert.deepEqual(await metadata(),permissions);
+        assert.deepEqual(await snapshot(),before);
+        // pg_get_functiondef preserves indentation in the SQL body.
+        assert.equal((await definition()).replace(/\s/g,''),canonical.replace(/\s/g,''));
+      }
+      await auth(personalCoach);assert.deepEqual((await db.query('SELECT app_access() AS data')).rows[0].data,{allowed:true,role:'coach',private_staff:false});
+      assert.equal((await db.query('SELECT * FROM sessions')).rows.length,2);
+      await assert.rejects(workspace(null),/privada|denegado/);
+      await privileged();
+    });
+    await t.test('callup upgrade patches the three legacy restrictions atomically and preserves records, RLS, triggers and function permissions',async()=>{
+      await privileged();
+      const signatures=['public.batch4_guard_records()','public.batch4_workflow_access(uuid,text)','public.batch4_workflow_action(uuid,text,text,jsonb,boolean,jsonb)'];
+      const clauses=["OR (wf = 'callup' AND actor_role <> 'admin')","OR (p_workflow = 'callup' AND r <> 'admin')","OR (p_workflow = 'callup' AND r <> 'admin')"];
+      const marker='/* Coach callup access enabled; workflow locks still apply. */';
+      const definitions=()=>Promise.all(signatures.map(async signature=>(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition));
+      const metadata=()=>db.query('SELECT proowner,proacl,proconfig,prosecdef,provolatile,prolang FROM pg_proc WHERE oid=ANY($1::regprocedure[]) ORDER BY oid',[signatures]);
+      const tables=['profiles','app_access_members','players','sessions','callups','attendance','evaluations','cards','suspensions','private_staff_members','private_staff_control','private_staff_workflows','private_staff_callups','private_staff_attendance','private_staff_cards','private_staff_suspensions'];
+      const snapshot=async()=>({
+        data:await Promise.all(tables.map(async table=>(await db.query('SELECT to_jsonb(t) AS row FROM '+table+' t ORDER BY to_jsonb(t)::text')).rows)),
+        policies:(await db.query("SELECT * FROM pg_policies WHERE schemaname='public' ORDER BY tablename,policyname")).rows,
+        triggers:(await db.query("SELECT oid,tgname,tgenabled,pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal ORDER BY oid")).rows
+      });
+      const canonical=await definitions(),permissions=await metadata(),before=await snapshot();
+      const legacy=canonical.map((definition,i)=>{assert(definition.includes(marker));return definition.replace(marker,clauses[i]);});
+      for(const definition of legacy)await db.exec(definition);
+      await auth(personalCoach);assert.equal((await db.query("SELECT batch4_workflow_access($1,'callup') AS allowed",[sid])).rows[0].allowed,false);
+      await privileged();
+      for(let attempt=0;attempt<2;attempt++){
+        const result=await db.exec(read('supabase/batch4/ENABLE_COACH_CALLUPS.sql'));
+        assert.equal(result.at(-1).rows[0].coach_workflow_check.all_ok,true);
+        assert.deepEqual(await definitions(),canonical);
+        assert.deepEqual(await metadata(),permissions);
+        assert.deepEqual(await snapshot(),before);
+      }
+      await auth(personalCoach);assert.equal((await db.query("SELECT batch4_workflow_access($1,'callup') AS allowed",[sid])).rows[0].allowed,true);
+      await privileged();
+      const diagnostic=(await db.query(read('diagnostics/workflow_closure_read_only.sql'))).rows[0].workflow_closure_review;
+      assert.equal(diagnostic.sessions.length,2);assert.equal(diagnostic.functions.length,6);
+      // An unexpected third definition must undo the first two patches too.
+      const unexpected=[...legacy];unexpected[2]=legacy[2].replace(clauses[2],"OR (p_workflow = 'callup' AND r NOT IN ('admin'))");
+      for(const definition of unexpected)await db.exec(definition);
+      const beforeFailure=await definitions();
+      await assert.rejects(db.exec(read('supabase/batch4/ENABLE_COACH_CALLUPS.sql')),/difiere de la versi/);
+      await db.exec('ROLLBACK');
+      assert.deepEqual(await definitions(),beforeFailure);assert.deepEqual(await snapshot(),before);
+      for(const definition of canonical)await db.exec(definition);
+    });
+    await t.test('Coach access tracks current profile role, including newly assigned and demoted profiles',()=>isolated(async()=>{
+      await privileged();await db.query("UPDATE profiles SET role='coach' WHERE id=$1",[outsider]);
+      await auth(outsider);assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,true);
+      await privileged();await db.query("UPDATE profiles SET role='viewer' WHERE id=$1",[outsider]);
+      await auth(outsider);assert.deepEqual((await db.query('SELECT app_access() AS data')).rows[0].data,{allowed:false,role:null,private_staff:false});
+      assert.equal((await db.query('SELECT * FROM sessions')).rows.length,0);
+      await auth(id(99));assert.equal((await db.query('SELECT app_access() AS data')).rows[0].data.allowed,false);
+    }));
     await auth(susan);let initial=await action('add_member',{name:'Technical staff fixture',job:'Entrenador'});const member=initial.members[0].id;
     const called={rows:[{staff_id:member,status:'called_up'}]};
     await t.test('directory upgrade patches a legacy installation, preserves data and permissions, and is idempotent',async()=>{
@@ -182,8 +252,8 @@ test('private staff and membership restrictions against the exported schema and 
       await auth(juli);await assert.rejects(action('add_member',{name:'Denied'},after.revision),/denegado/);
       await auth(susan);assert.equal((await workspace()).revision,after.revision);
     }));
-    await t.test('approved Admin and single Coach accounts enter; unapproved accounts stay blocked',()=>isolated(async()=>{
-      for(const [person,allowed,privateStaff]of [[susan,true,true],[sergi,true,true],[juli,true,false],[outsider,false,false]]){
+    await t.test('approved Admin and all Coach accounts enter; unapproved Admin accounts stay blocked',()=>isolated(async()=>{
+      for(const [person,allowed,privateStaff]of [[susan,true,true],[sergi,true,true],[juli,true,false],[personalCoach,true,false],[outsider,false,false]]){
         await auth(person);const result=(await db.query('SELECT app_access() AS data')).rows[0].data;
         assert.equal(result.allowed,allowed);assert.equal(result.private_staff,privateStaff);
         if(!allowed)assert.equal(result.role,null);
@@ -191,15 +261,15 @@ test('private staff and membership restrictions against the exported schema and 
       await auth(null);assert.equal((await db.query('SELECT app_has_access() AS ok')).rows[0].ok,false);
       await assert.rejects(workspace(),/permission|denied/i);
     }));
-    await t.test('Juli cannot read private rows, invoke staff RPCs, or give himself private access',()=>isolated(async()=>{
-      await auth(juli);
+    for(const person of [juli,personalCoach])await t.test('Coach '+person+' cannot read private rows, invoke staff RPCs, or give himself private access',()=>isolated(async()=>{
+      await auth(person);
       assert.equal((await db.query('SELECT * FROM private_staff_members')).rows.length,0);
       for(const table of ['private_staff_callups','private_staff_attendance','private_staff_cards','private_staff_suspensions','private_staff_control','private_staff_workflows'])assert.equal((await db.query('SELECT * FROM '+table)).rows.length,0);
       await assert.rejects(workspace(),/privada|denegado/);
       await assert.rejects(action('add_member',{name:'Denied'},0),/privada|denegado/);
-      await assert.rejects(db.query('INSERT INTO app_access_members VALUES($1)',[juli]),/permission denied/);
+      await assert.rejects(db.query('INSERT INTO app_access_members VALUES($1)',[person]),/permission denied/);
       await assert.rejects(db.query('UPDATE private_staff_members SET name=$1',['Denied']),/permission denied/);
-      assert.equal((await db.query("UPDATE profiles SET role='admin' WHERE id=$1 RETURNING id",[juli])).rows.length,0);
+      assert.equal((await db.query("UPDATE profiles SET role='admin' WHERE id=$1 RETURNING id",[person])).rows.length,0);
       await assert.rejects(workspace(),/privada|denegado/);
     }));
     await t.test('removed old account loses table reads, writes, views, batch4 and VEO RPCs with the same JWT',()=>isolated(async()=>{
@@ -251,21 +321,41 @@ test('private staff and membership restrictions against the exported schema and 
         assert.deepEqual(after,{attendance_confirmed:true,evaluation_confirmed:true,draft_defaults_version:null});
       }));
     }
-    await t.test('the approved Coach still evaluates players after Admin records callup and attendance',()=>isolated(async()=>{
-      await auth(susan);
+    for(const [label,person] of [['Admin A',susan],['Admin B',sergi],['shared Coach',juli],['personal Coach',personalCoach]])await t.test(label+' completes and locks all three player workflows',()=>isolated(async()=>{
+      await auth(person);
+      assert.equal((await db.query("SELECT batch4_workflow_access($1,'callup') AS allowed",[sid])).rows[0].allowed,true);
+      for(const wf of ['attendance','evaluation'])assert.equal((await db.query('SELECT batch4_workflow_access($1,$2) AS allowed',[sid,wf])).rows[0].allowed,false);
       const callups=[{session_id:sid,player_id:id(20),status:'called_up',evaluable:true}];
       await db.query("SELECT batch4_workflow_action($1,'callup','confirm',$2::jsonb,false,'[]'::jsonb)",[sid,JSON.stringify(callups)]);
+      await assert.rejects(db.query("SELECT batch4_workflow_action($1,'callup','confirm',$2::jsonb,false,$2::jsonb)",[sid,JSON.stringify(callups)]),/Stale workflow state/);
+      assert.equal((await db.query("SELECT batch4_workflow_access($1,'attendance') AS allowed",[sid])).rows[0].allowed,true);
       await db.query("INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,'present')",[sid,id(20)]);
       const attendance=[{session_id:sid,player_id:id(20),status:'present',notes:null}];
       await db.query("SELECT batch4_workflow_action($1,'attendance','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify(attendance)]);
-      await auth(juli);
+      await auth(person);
       assert.equal((await db.query('SELECT draft_defaults_version FROM sessions WHERE id=$1',[sid])).rows[0].draft_defaults_version,null);
       const row=(await db.query(`INSERT INTO evaluations(session_id,player_id,tactical_discipline,effort_commitment,decision_making,mentality_attitude,coachability,na_fields)
         VALUES($1,$2,3,3,3,3,3,'{"coachability":true}') RETURNING *`,[sid,id(20)])).rows[0];
       await db.query("SELECT batch4_workflow_action($1,'evaluation','confirm',$2::jsonb,false,NULL)",[sid,JSON.stringify([row])]);
       const result=(await db.query('SELECT evaluated,total_score FROM evaluations WHERE session_id=$1',[sid])).rows[0];
       assert.equal(result.evaluated,true);assert.equal(Number(result.total_score),3);
-      await assert.rejects(workspace(),/privada|denegado/);
+      assert.equal((await db.query('SELECT * FROM official_evaluations WHERE session_id=$1',[sid])).rows.length,1);
+      assert.equal((await db.query('SELECT * FROM players')).rows.length,1);
+      assert.equal((await db.query('SELECT * FROM attendance WHERE session_id=$1',[sid])).rows.length,1);
+      const closed=(await db.query('SELECT callup_confirmed,attendance_confirmed,evaluation_confirmed,callup_confirmed_at,attendance_confirmed_at,evaluation_confirmed_at FROM sessions WHERE id=$1',[sid])).rows[0];
+      for(const wf of ['callup','attendance','evaluation']){
+        assert.equal(closed[wf+'_confirmed'],true);assert(closed[wf+'_confirmed_at']);
+        assert.equal((await db.query('SELECT batch4_workflow_access($1,$2) AS allowed',[sid,wf])).rows[0].allowed,false);
+      }
+      await assert.rejects(db.query("UPDATE attendance SET status='late' WHERE session_id=$1",[sid]),/closed/);
+      await assert.rejects(db.query("UPDATE evaluations SET comment='After closure' WHERE session_id=$1",[sid]),/closed/);
+      await auth(person); // Reload / same identity still sees all three closures.
+      const persisted=(await db.query('SELECT callup_confirmed,attendance_confirmed,evaluation_confirmed FROM sessions WHERE id=$1',[sid])).rows[0];
+      assert.deepEqual(persisted,{callup_confirmed:true,attendance_confirmed:true,evaluation_confirmed:true});
+      if([juli,personalCoach].includes(person)){
+        for(const wf of ['callup','attendance','evaluation'])await assert.rejects(db.query("SELECT batch4_workflow_action($1,$2,'reopen')",[sid,wf]),/permission denied/);
+        await assert.rejects(workspace(),/privada|denegado/);
+      }
     }));
     await t.test('missing statuses, duplicate members, unexplained absence and stale revisions never overwrite saved data',()=>isolated(async()=>{
       await auth(susan);

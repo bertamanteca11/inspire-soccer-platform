@@ -49,7 +49,7 @@ export function CallupPage({ role, session, reload, setError }: {
   const suspensionName = (row:any) => players.find(p=>p.id===row.player_id)?.display_name || row.display_name || 'Jugador';
 
   const access = useWorkflowAccess(session.id, 'callup', localLocked);
-  const locked = localLocked || role !== 'admin' || !access.canEdit;
+  const locked = localLocked || !['admin','coach'].includes(role) || !access.canEdit;
   const isAdmin = role === 'admin';
 
   useEffect(() => {
