@@ -9,6 +9,71 @@ require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f
 const {reviewedEvaluationRows}=require('../src/utils/evaluationDefaults.ts');
 const {evaluationTotal}=require('../src/utils/evaluationScores.ts');
 
+test('previous session status correction changes only already confirmed past sessions and is idempotent',async()=>{
+  const db=await createReleaseDatabase(),admin=id(1),coach=id(2),player=id(20);
+  try{
+    await db.exec(sql('tests/fixtures/live-schema-2026-11-06.sql'));
+    for(const [person,role]of [[admin,'admin'],[coach,'coach']]){
+      await db.query('INSERT INTO auth.users VALUES($1)',[person]);
+      await db.query('INSERT INTO profiles(id,email,role) VALUES($1,$2,$3)',[person,role+'@example.test',role]);
+    }
+    await db.query("INSERT INTO players(id,name,display_name) VALUES($1,'Synthetic','Synthetic')",[player]);
+    // Prepare historical originals before installing the workflow guards.
+    for(const [offset,state,flags,days,locked]of [
+      [30,'planned',[true,true,true],-30,false],
+      [31,'planned',[true,true,true],0,false],
+      [32,'planned',[true,true,false],-20,false],
+      [33,'planned',[true,false,true],-20,false],
+      [34,'planned',[false,true,true],-20,false],
+      [35,'planned',[true,true,true],1,false],
+      [36,'planned',[true,true,true],-20,true],
+      [37,'archived',[true,true,true],-20,false],
+      [38,'cancelled',[true,true,true],-20,false],
+      [39,'locked',[true,true,true],-20,false],
+      [40,'completed',[true,true,true],-20,false],
+    ]){
+      const sid=id(offset);
+      await db.query(`INSERT INTO sessions(id,name,session_date,type,status,callup_confirmed,attendance_confirmed,evaluation_confirmed,
+        callup_confirmed_at,attendance_confirmed_at,evaluation_confirmed_at,locked_at,notes)
+        VALUES($1,'Synthetic prior session',(statement_timestamp() AT TIME ZONE 'Europe/Copenhagen')::date+$2::integer,'training',$3,$4,$5,$6,
+          now()-interval '1 month',now()-interval '1 month',now()-interval '1 month',CASE WHEN $7 THEN now() ELSE NULL END,'Original session notes')`,
+        [sid,days,state,...flags,locked]);
+      await db.query("INSERT INTO callups(session_id,player_id,status,evaluable) VALUES($1,$2,'called_up',true)",[sid,player]);
+      await db.query("INSERT INTO attendance(session_id,player_id,status,notes) VALUES($1,$2,'present','Original attendance notes')",[sid,player]);
+      await db.query("INSERT INTO evaluations(session_id,player_id,comment) VALUES($1,$2,'Original evaluation comment')",[sid,player]);
+    }
+    await db.exec(sql('supabase/batch4/REVIEW_INSTALL.sql'));
+    const sessions=async()=>(await db.query('SELECT to_jsonb(s) AS row FROM sessions s ORDER BY id')).rows.map(r=>r.row);
+    const sporting=async()=>(await db.query(`SELECT * FROM (
+      SELECT 'callups' AS source,to_jsonb(c) AS row FROM callups c UNION ALL SELECT 'attendance',to_jsonb(a) FROM attendance a
+      UNION ALL SELECT 'evaluations',to_jsonb(e) FROM evaluations e UNION ALL SELECT 'cards',to_jsonb(c) FROM cards c
+      UNION ALL SELECT 'suspensions',to_jsonb(s) FROM suspensions s) records ORDER BY source,row::text`)).rows;
+    const security=async()=>(await db.query(`SELECT jsonb_build_object(
+      'policies',(SELECT jsonb_agg(to_jsonb(p) ORDER BY tablename,policyname) FROM pg_policies p WHERE schemaname='public'),
+      'triggers',(SELECT jsonb_agg(jsonb_build_object('oid',oid,'definition',pg_get_triggerdef(oid),'enabled',tgenabled) ORDER BY oid) FROM pg_trigger WHERE NOT tgisinternal),
+      'functions',(SELECT jsonb_agg(jsonb_build_object('oid',p.oid,'definition',pg_get_functiondef(p.oid),'owner',proowner,'acl',proacl,'config',proconfig,'definer',prosecdef) ORDER BY p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prokind='f')
+    ) AS metadata`)).rows[0].metadata;
+    const before=await sessions(),records=await sporting(),permissions=await security();
+    const patch=sql('supabase/batch4/COMPLETE_PREVIOUS_CONFIRMED_SESSIONS.sql');
+    for(let attempt=0;attempt<2;attempt++){
+      const results=await db.exec(patch),report=results.flatMap(r=>r.rows||[]).find(r=>r.previous_sessions_completion)?.previous_sessions_completion;
+      assert.equal(report.all_ok,true);assert.equal(report.updated_count,attempt===0?2:0);
+      assert.deepEqual(report.updated_sessions.map(s=>s.id),attempt===0?[id(30),id(31)]:[]);
+      assert.equal(report.pending_count,3);assert.deepEqual(report.pending_sessions.map(s=>s.id),[id(32),id(33),id(34)]);
+      const after=await sessions();
+      for(const original of before){
+        const row=after.find(s=>s.id===original.id);
+        assert.deepEqual(row,{...original,status:[id(30),id(31)].includes(original.id)?'completed':original.status});
+      }
+      assert.deepEqual(await sporting(),records);assert.deepEqual(await security(),permissions);
+    }
+    await db.exec(`SELECT set_config('request.jwt.claim.sub','${coach}',false);SET ROLE authenticated;`);
+    await assert.rejects(db.exec(patch),/SQL Editor como postgres/);
+    await db.exec('ROLLBACK;RESET ROLE');
+    assert.deepEqual(await sporting(),records);
+  }finally{await db.close();}
+});
+
 test('automatic session completion is atomic, role-safe and compatible with the installed generated total fix',async t=>{
   const db=await createReleaseDatabase(),admin=id(1),adminB=id(2),coach=id(3),coachB=id(4),viewer=id(5),player=id(20);
   const auth=person=>db.exec(`RESET ROLE;SELECT set_config('request.jwt.claim.sub','${person||''}',false);SET ROLE ${person?'authenticated':'anon'};`);

@@ -32,6 +32,22 @@ instalación mantienen su estado existente; no se reabren ni se confirman de
 nuevo para cambiar su etiqueta. Un Admin puede marcar una de esas sesiones
 como Completada desde Sesiones → Editar si corresponde a una actividad realizada.
 
+Para corregir en conjunto las sesiones anteriores, Berta autorizó además
+`supabase/batch4/COMPLETE_PREVIOUS_CONFIRMED_SESSIONS.sql`. Ejecutarlo como
+`postgres` cambia únicamente `status` de Planificada a Completada cuando las
+tres partes ya están confirmadas, no hay bloqueo global y la fecha no es futura
+según Europe/Copenhagen. Se puede repetir. Devuelve las sesiones actualizadas y
+las que conservan partes pendientes; no confirma ni reabre ninguna parte y
+conserva todos los registros y fechas de confirmación. No cambia archivadas,
+canceladas o bloqueadas. Como el estado se utiliza en los informes, las sesiones
+corregidas pasan también a formar parte de los períodos que incluyen actividades
+completadas, conservando las reglas deportivas existentes.
+La prueba de esta corrección comprueba once combinaciones de fecha, estado,
+bloqueo y confirmaciones, conservación de todas las columnas salvo el estado
+autorizado, registros deportivos, funciones, permisos, políticas y triggers;
+también verifica la repetición sin cambios adicionales y exige ejecutar como
+`postgres`.
+
 Los instaladores de proyectos nuevos incorporan la misma automatización.
 Las pruebas usan identidades y datos sintéticos en PostgreSQL aislado, con
 `total_score` generado: dos Admin y dos Coach, cierre y reapertura, devolución
