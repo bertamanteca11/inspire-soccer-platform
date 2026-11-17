@@ -360,6 +360,14 @@ BEGIN
       UPDATE public.sessions SET evaluation_confirmed=true,evaluation_confirmed_at=now(),records_only_confirmed=p_records_only WHERE id=p_session;
     END IF;
   END IF;
+  -- Complete the session atomically after all three reviewed confirmations.
+  -- Reopening a workflow does not undo the fact that the session took place.
+  IF p_action = 'confirm' THEN
+    UPDATE public.sessions SET status='completed'
+      WHERE id=p_session AND status::text='planned' AND locked_at IS NULL
+        AND callup_confirmed IS TRUE AND attendance_confirmed IS TRUE
+        AND evaluation_confirmed IS TRUE;
+  END IF;
   SELECT * INTO s FROM public.sessions WHERE id=p_session;
   RETURN to_jsonb(s);
 END $$;

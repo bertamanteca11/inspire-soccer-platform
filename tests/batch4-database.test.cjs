@@ -12,7 +12,7 @@ test('Batch 4 SQL in isolated synthetic PostgreSQL; adapters are fixtures, not l
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       CREATE TABLE profiles(id uuid PRIMARY KEY,role text);
       INSERT INTO profiles VALUES('${admin}','admin'),('${coach}','coach'),('${viewer}','viewer');
-      CREATE TABLE sessions(id uuid PRIMARY KEY, status text DEFAULT 'planned', globally_locked boolean DEFAULT false,
+      CREATE TABLE sessions(id uuid PRIMARY KEY, status text DEFAULT 'planned', globally_locked boolean DEFAULT false,locked_at timestamptz,
         callup_confirmed boolean NOT NULL DEFAULT false,callup_confirmed_at timestamptz,
         attendance_confirmed boolean NOT NULL DEFAULT false,attendance_confirmed_at timestamptz,
         evaluation_confirmed boolean NOT NULL DEFAULT false,evaluation_confirmed_at timestamptz,records_only_confirmed boolean DEFAULT false);

@@ -6,6 +6,7 @@ const session: any = { id: 'session-nov6', name: 'Entrenamiento viernes 6', sess
   high_rating_limit: 6, low_rating_limit: 3 };
 const player = { id: 'player', name: 'Synthetic Player', display_name: 'Synthetic', shirt_number: 18, active: true };
 const requests: any[] = [];
+let evaluations: any[] = [];
 let selectedError = false;
 let holdSelected = false;
 let releaseSelected: (() => void) | undefined;
@@ -30,7 +31,8 @@ function query(table: string) {
     if (table === 'sessions' && one && selectedError) return { data: null, error: { message: 'Session read unavailable' } };
     const rows = table === 'sessions' ? [{ ...session }] : table === 'players' ? [player]
       : table === 'callups' ? [{ id: 'call', session_id: session.id, player_id: player.id, status: 'called_up', evaluable: true }]
-      : table === 'attendance' ? [{ id: 'visit', session_id: session.id, player_id: player.id, status: 'present', notes: null }] : [];
+      : table === 'attendance' ? [{ id: 'visit', session_id: session.id, player_id: player.id, status: 'present', notes: null }]
+      : table === 'evaluations' ? evaluations : [];
     const data = rows.filter(row => filters.every(filter => filter(row))).slice(start, end);
     return { data: one ? data[0] || null : data, error: null };
   })().then(resolve, reject);
@@ -40,6 +42,11 @@ export const supabase = { from: query, rpc: async (name: string, args: any) => {
   requests.push({ table: name, method: 'rpc', args });
   if (name === 'app_access') return { data: { allowed: true, role: 'admin', private_staff: false }, error: null };
   if (name === 'batch4_workflow_access') return { data: args.p_workflow === 'evaluation' ? session.attendance_confirmed && !session.evaluation_confirmed : true, error: null };
+  if (name === 'batch4_workflow_action' && args.p_workflow === 'evaluation' && args.p_action === 'confirm') {
+    evaluations = args.p_rows.map((row: any, i: number) => ({ ...row, id: row.id || 'saved-evaluation-' + i, evaluated: true }));
+    Object.assign(session, { evaluation_confirmed: true, status: 'completed' });
+    return { data: { ...session }, error: null };
+  }
   if (name === 'veo_status') return { data: null, error: { code: 'PGRST202', message: 'Synthetic VEO unavailable' } };
   throw new Error('Unexpected write RPC: ' + name);
 }, auth: {

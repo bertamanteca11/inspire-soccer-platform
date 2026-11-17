@@ -9,6 +9,124 @@ require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f
 const {reviewedEvaluationRows}=require('../src/utils/evaluationDefaults.ts');
 const {evaluationTotal}=require('../src/utils/evaluationScores.ts');
 
+test('automatic session completion is atomic, role-safe and compatible with the installed generated total fix',async t=>{
+  const db=await createReleaseDatabase(),admin=id(1),adminB=id(2),coach=id(3),coachB=id(4),viewer=id(5),player=id(20);
+  const auth=person=>db.exec(`RESET ROLE;SELECT set_config('request.jwt.claim.sub','${person||''}',false);SET ROLE ${person?'authenticated':'anon'};`);
+  const privileged=()=>db.exec(`RESET ROLE;SELECT set_config('request.jwt.claim.sub','${admin}',false);`);
+  const signature='public.batch4_workflow_action(uuid,text,text,jsonb,boolean,jsonb)';
+  const definition=async()=>(await db.query('SELECT pg_get_functiondef($1::regprocedure) AS definition',[signature])).rows[0].definition.replace(/\r/g,'');
+  const metadata=async()=>(await db.query('SELECT proowner,proacl,proconfig,prosecdef,provolatile,prolang FROM pg_proc WHERE oid=$1::regprocedure',[signature])).rows[0];
+  const row=async sid=>(await db.query('SELECT * FROM sessions WHERE id=$1',[sid])).rows[0];
+  const action=async(sid,wf,act,rows=[],expected)=>{
+    const result=await db.query('SELECT batch4_workflow_action($1,$2,$3,$4::jsonb,false,$5::jsonb) AS result',[sid,wf,act,JSON.stringify(rows),expected===undefined?null:JSON.stringify(expected)]);
+    return result.rows[0].result;
+  };
+  const snapshot=async()=>({
+    records:(await db.query(`SELECT * FROM (SELECT 'sessions' AS source,to_jsonb(s) AS row FROM sessions s UNION ALL
+      SELECT 'callups',to_jsonb(c) FROM callups c UNION ALL SELECT 'attendance',to_jsonb(a) FROM attendance a
+      UNION ALL SELECT 'evaluations',to_jsonb(e) FROM evaluations e UNION ALL SELECT 'cards',to_jsonb(c) FROM cards c
+      UNION ALL SELECT 'suspensions',to_jsonb(s) FROM suspensions s) records ORDER BY source,row::text`)).rows,
+    policies:(await db.query("SELECT * FROM pg_policies WHERE schemaname='public' ORDER BY tablename,policyname")).rows,
+    triggers:(await db.query('SELECT oid,tgname,tgenabled,pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal ORDER BY oid')).rows,
+    finalizer:(await db.query("SELECT pg_get_functiondef('public.batch4_finalize_evaluation(uuid,uuid,jsonb,boolean)'::regprocedure) AS definition")).rows,
+    column:(await db.query("SELECT a.attgenerated,pg_get_expr(d.adbin,d.adrelid) AS expression FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='public.evaluations'::regclass AND a.attname='total_score'")).rows
+  });
+  let counter=30;
+  const createSession=async(extra='')=>{
+    await privileged();const sid=id(counter++);
+    await db.query(`INSERT INTO sessions(id,name,session_date,type,draft_defaults_version) VALUES($1,'Synthetic auto completion','2026-11-17','training',1)`,[sid]);
+    if(extra)await db.query('UPDATE sessions SET '+extra+' WHERE id=$1',[sid]);
+    return sid;
+  };
+  const roster=sid=>[{session_id:sid,player_id:player,status:'called_up',evaluable:true}];
+  try{
+    let schema=sql('tests/fixtures/live-schema-2026-11-06.sql').replace('"total_score" "pg_catalog"."numeric",','"total_score" "pg_catalog"."numeric" GENERATED ALWAYS AS (round((tactical_discipline+effort_commitment+decision_making+mentality_attitude+coachability)::numeric/5,2)) STORED,');
+    await db.exec(schema);
+    for(const [person,role]of [[admin,'admin'],[adminB,'admin'],[coach,'coach'],[coachB,'coach'],[viewer,'viewer']]){
+      await db.query('INSERT INTO auth.users VALUES($1)',[person]);
+      await db.query('INSERT INTO profiles(id,email,role) VALUES($1,$2,$3)',[person,person+'@example.test',role]);
+    }
+    await db.query("INSERT INTO players(id,name,display_name) VALUES($1,'Synthetic','Synthetic')",[player]);
+    await db.exec(sql('supabase/batch4/REVIEW_INSTALL.sql'));
+    await db.exec(sql('supabase/staff/INSTALL_PRIVATE_STAFF.sql').replace('INSERT INTO staff_access_setup VALUES (NULL);',`INSERT INTO staff_access_setup VALUES ('${coach}'::uuid);`));
+    await db.exec(sql('supabase/staff/RESTORE_COACH_ACCESS.sql'));
+    // Keep an already closed planned session to prove installation does not backfill history.
+    const legacy=await createSession('callup_confirmed=true,attendance_confirmed=true,evaluation_confirmed=true');
+    const patch=sql('supabase/batch4/ENABLE_AUTOMATIC_SESSION_COMPLETION.sql').replace(/\r/g,'');
+    const oldStatement=patch.match(/\$old\$([\s\S]*?)\$old\$/)[1],newStatement=patch.match(/\$new\$([\s\S]*?)\$new\$/)[1];
+    const canonical=await definition(),permissions=await metadata();assert(canonical.includes(newStatement));
+    await db.exec(canonical.replace(newStatement,oldStatement));
+    const before=await snapshot();
+    for(let attempt=0;attempt<2;attempt++){
+      const result=await db.exec(patch);
+      assert.equal(result.at(-1).rows[0].automatic_session_completion_check.all_ok,true);
+      assert.deepEqual(await metadata(),permissions);assert.equal(await definition(),canonical);
+      assert.deepEqual(await snapshot(),before);assert.equal((await row(legacy)).status,'planned');
+    }
+    for(const [person,label]of [[admin,'Admin A'],[adminB,'Admin B'],[coach,'Coach A'],[coachB,'Coach B']])await t.test(label+' completes only after all three confirmations, returns completed and preserves closure locks',async()=>{
+      const sid=await createSession();await auth(person);
+      assert.equal((await action(sid,'callup','confirm',roster(sid),[])).status,'planned');
+      await db.query("INSERT INTO attendance(session_id,player_id,status,notes) VALUES($1,$2,'present','Preserved attendance note')",[sid,player]);
+      const visits=(await db.query('SELECT * FROM attendance WHERE session_id=$1',[sid])).rows;
+      assert.equal((await action(sid,'attendance','confirm',visits)).status,'planned');
+      const beforeFailed=await row(sid);
+      await assert.rejects(action(sid,'evaluation','confirm',[]),/Missing eligible evaluation/);
+      assert.deepEqual(await row(sid),beforeFailed);
+      const payload=reviewedEvaluationRows(await row(sid),[],[player]);
+      const confirmed=await action(sid,'evaluation','confirm',payload);
+      assert.equal(confirmed.status,'completed');assert(confirmed.callup_confirmed&&confirmed.attendance_confirmed&&confirmed.evaluation_confirmed);
+      assert.equal((await row(sid)).status,'completed');
+      assert.equal((await db.query('SELECT notes FROM attendance WHERE session_id=$1',[sid])).rows[0].notes,'Preserved attendance note');
+      assert.equal(Number((await db.query('SELECT total_score FROM evaluations WHERE session_id=$1',[sid])).rows[0].total_score),3);
+      for(const table of ['attendance','evaluations'])await assert.rejects(db.query(`DELETE FROM ${table} WHERE session_id=$1`,[sid]),/closed/);
+      if(person===coach||person===coachB)await assert.rejects(action(sid,'evaluation','reopen'),/permission denied/);
+      await auth(admin);
+      const reopened=await action(sid,'evaluation','reopen');
+      assert.equal(reopened.status,'completed');assert.equal(reopened.evaluation_confirmed,false);
+      await db.query("UPDATE evaluations SET comment='Reviewed again' WHERE session_id=$1",[sid]);
+      const stored=(await db.query('SELECT * FROM evaluations WHERE session_id=$1',[sid])).rows;
+      await auth(person);assert.equal((await action(sid,'evaluation','confirm',stored)).status,'completed');
+      assert.equal((await row(legacy)).status,'planned');
+    });
+    for(const wf of ['callup','attendance'])await t.test(wf+' can be the final confirmation of an existing reviewed session',async()=>{
+      const sid=await createSession();await auth(admin);
+      await action(sid,'callup','confirm',roster(sid),[]);
+      await db.query("INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,'present')",[sid,player]);
+      const visits=(await db.query('SELECT * FROM attendance WHERE session_id=$1',[sid])).rows;
+      await action(sid,'attendance','confirm',visits);
+      await action(sid,'evaluation','confirm',reviewedEvaluationRows(await row(sid),[],[player]));
+      assert.equal((await action(sid,wf,'reopen')).status,'completed');
+      await privileged();await db.query("UPDATE sessions SET status='planned' WHERE id=$1",[sid]);
+      await auth(coachB);
+      const result=await action(sid,wf,'confirm',wf==='callup'?roster(sid):visits,wf==='callup'?roster(sid):undefined);
+      assert.equal(result.status,'completed');
+    });
+    await t.test('access failures, archived/cancelled sessions and global locks cannot be turned into completed sessions',async()=>{
+      const sid=await createSession();
+      for(const person of [null,viewer]){
+        await auth(person);await assert.rejects(action(sid,'callup','confirm',roster(sid),[]),/permission denied/);
+      }
+      for(const state of ['archived','cancelled']){
+        await privileged();await db.query('UPDATE sessions SET status=$1 WHERE id=$2',[state,sid]);
+        await auth(admin);await assert.rejects(action(sid,'callup','confirm',roster(sid),[]),/not operational/);
+        assert.equal((await row(sid)).status,state);
+      }
+      for(const lock of ["status='locked'","status='planned',locked_at=now()"]){
+        const lockedSid=await createSession(lock);
+        await auth(coach);await assert.rejects(action(lockedSid,'callup','confirm',roster(lockedSid),[]),/locked/);
+        await auth(admin);await action(lockedSid,'callup','confirm',roster(lockedSid),[]);
+        await db.query("INSERT INTO attendance(session_id,player_id,status) VALUES($1,$2,'present')",[lockedSid,player]);
+        const visits=(await db.query('SELECT * FROM attendance WHERE session_id=$1',[lockedSid])).rows;
+        await action(lockedSid,'attendance','confirm',visits);
+        await db.query("INSERT INTO evaluations(session_id,player_id) VALUES($1,$2)",[lockedSid,player]);
+        const stored=(await db.query('SELECT * FROM evaluations WHERE session_id=$1',[lockedSid])).rows;
+        const result=await action(lockedSid,'evaluation','confirm',stored);
+        assert.equal(result.status,lock.includes("'locked'")?'locked':'planned');
+      }
+    });
+  }finally{await db.close();}
+});
+
 for(const generated of [false,true])test(`evaluation finalization supports ${generated?'generated':'ordinary'} total_score without changing column definitions or sporting originals`,async t=>{
   const db=await createReleaseDatabase(),admin=id(1),coach=id(2);
   const reset=()=>db.exec('RESET ROLE');

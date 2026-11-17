@@ -55,3 +55,18 @@ test('Evaluation waits for the authoritative read before showing prerequisite st
   await expect(page.locator('.rating-player-row')).toHaveCount(1);
   await assertReadOnly(page,state);
 });
+
+test('confirming Evaluation shows the completed status returned by the RPC in Sessions without a direct session update',async({page})=>{
+  const state=await setup(page);
+  await page.evaluate(()=>window.workflowFixture.patch({attendance_confirmed:true,draft_defaults_version:1}));
+  await page.getByRole('button',{name:'Evaluar',exact:true}).first().click();
+  await expect(page.locator('.rating-player-row')).toHaveCount(1);
+  page.once('dialog',dialog=>dialog.accept());
+  await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.workflowFixture.requests.filter(r=>r.table==='batch4_workflow_action').length)).toBe(1);
+  await page.getByRole('button',{name:'Sesiones',exact:true}).first().click();
+  await expect(page.locator('.session-card .session-status')).toHaveText('Completada');
+  const writes=await page.evaluate(()=>window.workflowFixture.requests.filter(r=>!['select','rpc'].includes(r.method)||r.table==='batch4_workflow_action'));
+  expect(writes).toHaveLength(1);expect(writes[0].args.p_action).toBe('confirm');
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
+});
