@@ -4,7 +4,7 @@ require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f
 const fixture=require('./final.fixture.ts');
 const html='<html lang="es"><body><div id="root"></div><script type="module">import R from "/@react-refresh";R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>t=>t;window.__vite_plugin_react_preamble_installed__=true;</script><script type="module" src="/tests/final.harness.tsx"></script></body></html>';
 
-async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false,unmarkedEvaluation=false,failInitialDefaults=false,searchRoster=false}={}){
+async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false,failSuspension=false,slowWrite=false,newEvaluation=false,staleEvaluation=false,match=false,longCareer=false,noEligible=false,missingWorkflow=false,activeSanction=false,allEligible=false,highLimit,lowLimit,staleDuringComment=false,unmarkedEvaluation=false,failInitialDefaults=false,searchRoster=false,workflowRejection=null}={}){
   const state={writes:[],unexpected:[],errors:[],pending:0};
   const data=structuredClone({players:fixture.players,sessions:fixture.sessions,callups:fixture.calls,attendance:fixture.visits,evaluations:newEvaluation?[]:fixture.evaluations,injuries:fixture.injuries,session_standouts:fixture.standouts,cards:[],suspensions:[],active_suspensions:[],player_card_totals:[],staff_flags:[],must_win_reviews:[],veo_matches:[],veo_player_match_stats:[],veo_player_links:[],veo_import_batches:[],veo_calculated_stats:[]});
   if(staleEvaluation)data.evaluations[0].tactical_discipline=1;
@@ -41,6 +41,7 @@ async function setup(page,{mode='home',role='admin',readDenied='',zeroCard=false
     if(table==='create_yellow_accumulation_suspensions'){state.writes.push({table});return route.fulfill({json:null});}
     if(table==='batch4_workflow_action'){
       const body=req.postDataJSON();state.writes.push({table,body});
+      if(workflowRejection)return route.fulfill({status:400,json:workflowRejection});
       if(unmarkedEvaluation&&body.p_workflow==='evaluation'&&body.p_action==='confirm'&&body.p_rows.some(row=>!row.id))return route.fulfill({status:409,json:{message:'Initial scores require marked new session'}});
       return route.fulfill({json:{id:body.p_session,[body.p_workflow+'_confirmed']:body.p_action==='confirm'}});
     }
@@ -180,6 +181,25 @@ for(const role of ['admin','coach'])test(`${role} confirms an evaluation with th
   for(const field of ['tactical_discipline','effort_commitment','decision_making','mentality_attitude']){expect(row[field]).toBe(3);expect(row.na_fields[field]).toBe(false);}
   await expect(page.getByRole('button',{name:'3',exact:true})).toBeDisabled();
   if(role==='coach')await expect(page.getByRole('button',{name:'Reabrir evaluación',exact:true})).toHaveCount(0);
+});
+
+test('a Coach can copy the real confirmation failure for support while the evaluation stays open and its scores remain unchanged',async({page})=>{
+  const failure={code:'P0001',message:'Stale evaluation snapshot; reload',details:'Private row contents',hint:'Internal SQL hint'};
+  const state=await setup(page,{mode:'evaluation',role:'coach',workflowRejection:failure});
+  await expect(page.getByRole('button',{name:'Confirmar evaluación',exact:true})).toBeEnabled();
+  const before=structuredClone(state.data.evaluations);
+  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Confirmar evaluación',exact:true}).click();
+  await expect(page.getByRole('alert').filter({hasText:'Las evaluaciones han cambiado'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Evaluación confirmada',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Confirmar evaluación',exact:true})).toBeEnabled();
+  await page.context().grantPermissions(['clipboard-read','clipboard-write']);
+  await page.getByRole('button',{name:'Copiar diagnóstico del error',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('Diagnóstico copiado');
+  const diagnostic=JSON.parse(await page.evaluate(()=>navigator.clipboard.readText()));
+  expect(diagnostic).toMatchObject({workflow:'evaluation',action:'confirm',code:'P0001',message:failure.message});
+  expect(Object.keys(diagnostic).sort()).toEqual(['action','code','message','session_id','workflow']);
+  expect(state.data.evaluations).toEqual(before);expect(state.writes).toHaveLength(1);
+  expect(state.unexpected).toEqual([]);expect(state.errors).toEqual([]);
 });
 
 test('explicit N/A overrides the initial 3 and is preserved while switching qualities',async({page})=>{

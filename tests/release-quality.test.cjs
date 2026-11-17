@@ -2,6 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,f);
 const calls=[];let response={};require.cache[require.resolve('../src/supabase.ts')]={exports:{supabase:{rpc:async(name,args)=>{calls.push({name,args});return response;}}}};
 const {workflowError}=require('../src/utils/workflowErrors.ts');
+const {workflowAction,WorkflowActionError}=require('../src/lib/workflows.ts');
 const {evaluationTotal}=require('../src/utils/evaluationScores.ts');
 const {evaluationSnapshot}=require('../src/utils/evaluationSnapshot.ts');
 const {latestMatchAndTrainings,sessionsInScope,recordsInScope,lastFourWeeks,seasonBounds,seasonStartYear,operationalPeriodSessions}=require('../src/utils/summaryScope.ts');
@@ -16,6 +17,35 @@ test('missing RPC message explains pending database update in Spanish without ex
  const message=workflowError({code:'PGRST202',message:'Could not find the function public.batch4_workflow_access in the schema cache'});
  assert.match(message,/actualización de la base de datos está pendiente/);assert.match(message,/desactivados/);
  assert.doesNotMatch(message,/schema cache|p_session|public\.|batch4/);
+});
+
+test('evaluation validation errors explain the rejected condition instead of implying a Coach permission failure',()=>{
+ for(const [backend,expected] of [
+   ['Numeric score for non-sporting record',/no figuran como evaluables/],
+   ['Stale evaluation snapshot; reload',/han cambiado/],
+   ['Missing eligible evaluation',/Faltan evaluaciones/],
+   ['Maximum high ratings reached',/notas altas/],
+   ['Maximum low ratings reached',/notas bajas/],
+   ['Duplicate workflow records',/duplicados/],
+   ['Invalid N/A flags',/formato no válido/],
+   ['Review and initialize the legacy completed accumulation cycle before saving cards',/sanción cumplida/],
+ ]){
+   const message=workflowError({code:'P0001',message:backend});
+   assert.match(message,expected);assert.doesNotMatch(message,/comprobar el permiso|no tiene permiso|public\.|batch4/);
+ }
+ assert.match(workflowError({code:'42501',message:'Workflow permission denied'}),/no tiene permiso/);
+ const unknown=workflowError({code:'P0001',message:'Unexpected SQL details and private row values'});
+ assert.doesNotMatch(unknown,/SQL details|private row/);
+});
+
+test('a rejected workflow preserves a limited support diagnostic without scores, comments, credentials or backend row details',async()=>{
+ response={data:null,error:{code:'P0001',message:'Stale evaluation snapshot; reload',details:'Private backend row',hint:'Internal SQL hint'}};
+ await assert.rejects(workflowAction('session-fixture','evaluation','confirm',[{comment:'Private comment',tactical_discipline:5}]),error=>{
+   assert(error instanceof WorkflowActionError);assert.match(error.message,/han cambiado/);
+   assert.deepEqual(error.diagnostic,{session_id:'session-fixture',workflow:'evaluation',action:'confirm',code:'P0001',message:'Stale evaluation snapshot; reload'});
+   assert.doesNotMatch(JSON.stringify(error.diagnostic),/Private|Internal|comment|tactical_discipline/);
+   return true;
+ });
 });
 test('retired fifth quality never affects current averages, but its original remains in concurrency snapshots',()=>{
  const row={id:'e',player_id:'p',session_id:'s',tactical_discipline:5,effort_commitment:4,decision_making:3,mentality_attitude:2,coachability:1};

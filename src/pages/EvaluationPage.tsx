@@ -1,4 +1,4 @@
-import { workflowAction } from '../lib/workflows';
+import { workflowAction, WorkflowActionError, type WorkflowDiagnostic } from '../lib/workflows';
 import { saveDisciplinaryCard } from '../lib/discipline';
 import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
@@ -102,6 +102,8 @@ export function EvaluationPage({
   const [recordSaving, setRecordSaving] = useState(false);
   const [recordsReady,setRecordsReady]=useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmationDiagnostic, setConfirmationDiagnostic] = useState<WorkflowDiagnostic | null>(null);
+  const [diagnosticNotice, setDiagnosticNotice] = useState('');
   const confirmationPending = useRef(false);
   const editPending = useRef(false);
   const confirmedCommentWrite = useRef<Evaluation | null>(null);
@@ -113,7 +115,7 @@ export function EvaluationPage({
   const isAdmin = role === 'admin';
 
   useEffect(() => { setLocalEvaluations((evaluations || []).filter(e => e.session_id === session.id)); }, [evaluations, session.id]);
-  useEffect(() => { setComments({}); setDirtyComments({}); setCardDrafts({}); setIndex(0); setSavedNotice(''); setDisciplineIssue(''); }, [session.id]);
+  useEffect(() => { setComments({}); setDirtyComments({}); setCardDrafts({}); setIndex(0); setSavedNotice(''); setDisciplineIssue(''); setConfirmationDiagnostic(null); setDiagnosticNotice(''); }, [session.id]);
   // Initialize comments without overwriting edits or recently saved text with stale props.
   useEffect(() => {
     setComments(prev => {
@@ -465,6 +467,7 @@ export function EvaluationPage({
     if (recordsOnlyCompleted || locked || confirmationPending.current || editPending.current || cardPending.current || recordSaving || eligibilityLoading || eligibilityError || !cardsReady || disciplineIssue) return;
     if (!window.confirm('Confirmar evaluacion con las puntuaciones explicitas y N/A revisados?')) return;
     confirmationPending.current = true; setConfirming(true);
+    setConfirmationDiagnostic(null); setDiagnosticNotice('');
     setError('');
     try {
       const [latest,calls,visits] = await Promise.all([
@@ -519,7 +522,10 @@ export function EvaluationPage({
       await workflowAction(session.id, 'evaluation', 'confirm', confirmationRows);
       setLocalLocked(true);
       if(moveToNextOpenSession)await moveToNextOpenSession();else await reload(session.id);
-    } catch(failure){setError(String(failure));}
+    } catch(failure){
+      if (failure instanceof WorkflowActionError) setConfirmationDiagnostic(failure.diagnostic);
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
     finally { confirmationPending.current = false; setConfirming(false); }
   }
 
@@ -553,6 +559,17 @@ export function EvaluationPage({
     <div className="stack">
       {access.error && <p role="alert">{access.error}</p>}
       <SessionHeading session={session}/>
+      {confirmationDiagnostic && <Card>
+        <p>No se ha podido confirmar la evaluación. Puedes copiar el diagnóstico para que revisemos el motivo.</p>
+        <button type="button" className="secondary" onClick={async()=>{
+          try {
+            await navigator.clipboard.writeText(JSON.stringify(confirmationDiagnostic,null,2));
+            setDiagnosticNotice('Diagnóstico copiado. Puedes enviarlo a Berta.');
+          } catch { setDiagnosticNotice('No se pudo copiar automáticamente. Abre «Ver diagnóstico» y copia el texto.'); }
+        }}>Copiar diagnóstico del error</button>
+        {diagnosticNotice && <p role="status">{diagnosticNotice}</p>}
+        <details><summary>Ver diagnóstico</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:12}}>{JSON.stringify(confirmationDiagnostic,null,2)}</pre></details>
+      </Card>}
       {cardReadError && <Card><p role="alert">No se pudieron verificar las tarjetas: {cardReadError}</p><button className="secondary" onClick={() => void loadCards()}>Reintentar lectura de tarjetas</button></Card>}
       {disciplineIssue && <p role="alert">{disciplineIssue}</p>}
       <Card><details><summary>Criterios de evaluación</summary><ul className="evaluation-criteria">
