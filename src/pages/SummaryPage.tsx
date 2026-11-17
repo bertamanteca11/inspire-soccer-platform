@@ -67,7 +67,7 @@ export function SummaryPage({ initialSessionId = '', onReviewAttendance }: { ini
   }
   const attendance = recordsInScope(data.attendance, scopedSessions, mode, playerId);
   const evaluations = recordsInScope(data.evaluations, scopedSessions, mode, playerId);
-  const cards = recordsInScope(data.cards, scopedSessions, mode, playerId);
+  const cards = recordsInScope(data.cards, scopedSessions, mode, playerId).filter(c=>!c.voided_at);
   const trace = attendanceTrace(scopedSessions, attendance, playerId);
   const validDates = !from || !to || from <= to;
   const candidates = data.sessions.filter(s => (!from || s.session_date >= from) && (!to || s.session_date <= to));

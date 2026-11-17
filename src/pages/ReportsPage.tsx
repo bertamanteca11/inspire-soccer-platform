@@ -46,7 +46,7 @@ export function ReportsPage() {
       if (version !== request.current) return;
       const scoped = (rows: ReportRow[]) => rows.filter(r => ids.has(r.session_id) && (!id || r.player_id === id));
       setData({ from,to,sessions,callups:scoped(performance.callups),evaluations:scoped(performance.evaluations),
-        attendance:scoped(performance.attendance),cards:scoped(cards),injuries,
+        attendance:scoped(performance.attendance),cards:scoped(cards.filter(c=>!c.voided_at)),injuries,
         standouts:scoped(operationalStandouts(standouts,performance.sessions)),suspensions });
     } catch (error) { if (version === request.current) setMessage(error instanceof Error ? error.message : String(error)); }
     finally { if (version === request.current) setLoading(false); }

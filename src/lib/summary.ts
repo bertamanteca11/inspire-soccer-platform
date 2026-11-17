@@ -4,7 +4,7 @@ import type { SummarySession } from '../utils/summaryScope';
 import type { AttendanceRecord } from '../utils/attendance';
 
 export type SummaryEvaluation = Record<string, any> & { id: string; session_id: string; player_id: string };
-export type SummaryCard = { id: string; session_id: string; player_id: string; type: string; players?: { display_name?: string } | null };
+export type SummaryCard = { id: string; session_id: string; player_id: string; type: string; discipline_kind?:string|null;voided_at?:string|null;players?: { display_name?: string } | null };
 export type SummaryPlayer = { id: string; display_name: string };
 export type SummaryData = { sessions: SummarySession[]; attendance: AttendanceRecord[]; evaluations: SummaryEvaluation[]; cards: SummaryCard[]; players: SummaryPlayer[]; excluded?: { row: SummaryEvaluation; reason: string }[] };
 

@@ -287,7 +287,9 @@ DECLARE s public.suspensions;n integer;credit integer;balance jsonb;current_seas
     credit:=s.accumulation_threshold;
     IF credit IS NULL THEN RAISE EXCEPTION 'Revisa cuántas amarillas consume este ciclo histórico.'; END IF;
     SELECT season_start INTO current_season FROM public.discipline_rules;
-    IF s.discipline_season_start IS DISTINCT FROM current_season OR s.created_from_session_id IS NULL THEN
+    IF s.discipline_season_start IS DISTINCT FROM current_season OR NOT EXISTS(
+      SELECT 1 FROM public.sessions origin WHERE origin.id=s.created_from_session_id
+        AND origin.session_date>=s.discipline_season_start AND origin.session_date<(s.discipline_season_start+interval '1 year')::date) THEN
       RAISE EXCEPTION 'Revisa el origen y la temporada de este ciclo antes de consumir amarillas.'; END IF;
     SELECT b INTO balance FROM jsonb_array_elements(public.discipline_balance_rows()) b WHERE (b->>'player_id')::uuid=s.player_id;
     -- The case being completed is served at this point, but its credit is inserted
@@ -376,7 +378,7 @@ DECLARE session_row public.sessions;old public.cards;saved public.cards;case_row
     SELECT b INTO balance FROM jsonb_array_elements(public.discipline_balance_rows()) b WHERE (b->>'player_id')::uuid=p_player;
     IF EXISTS(SELECT 1 FROM public.suspensions a WHERE a.player_id=p_player AND a.source='yellow_accumulation'
       AND a.status IN ('awaiting_decision','active','partially_served')
-      AND coalesce(a.accumulation_threshold,r.yellow_threshold)>(balance->>'cycle_yellows')::bigint) THEN
+      AND coalesce(a.accumulation_threshold,5)>(balance->>'cycle_yellows')::bigint) THEN
       RAISE EXCEPTION 'La corrección invalidaría una sanción por acumulación pendiente. Revisa y cancela esa decisión desde Sanción antes de corregir la tarjeta.';
     END IF;
   END IF;
@@ -464,7 +466,8 @@ DECLARE r public.discipline_rules;s public.suspensions;before_case jsonb;pid uui
         RAISE EXCEPTION 'Este ciclo ya consumió amarillas. No se modifica sin revisión del contador.'; END IF;
       UPDATE public.suspensions SET matches_total=duration,applicable_from=applicable,decision_date=decision,decision_notes=notes,
         created_from_session_id=coalesce(origin.id,created_from_session_id),
-        accumulation_threshold=CASE WHEN s.source='yellow_accumulation' THEN coalesce(accumulation_threshold,r.yellow_threshold) ELSE NULL END,
+        -- The inspected legacy engine used a fixed five-yellow threshold.
+        accumulation_threshold=CASE WHEN s.source='yellow_accumulation' THEN coalesce(accumulation_threshold,5) ELSE NULL END,
         discipline_season_start=CASE WHEN s.source='yellow_accumulation' THEN coalesce(discipline_season_start,r.season_start) ELSE discipline_season_start END,
         needs_review=CASE WHEN review THEN false ELSE needs_review END,
         matches_served=CASE WHEN review THEN n ELSE matches_served END,
