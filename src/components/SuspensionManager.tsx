@@ -7,7 +7,7 @@ import {Card} from './ui';
 import type {Role} from '../types';
 import {workflowError} from '../utils/workflowErrors';
 
-export function SuspensionManager({role,onChanged,playerId}:{role:Role;onChanged?:()=>void|Promise<void>;playerId?:string}) {
+export function SuspensionManager({role,onChanged,playerId,initialCreate=false,onDirtyChange}:{role:Role;onChanged?:()=>void|Promise<void>;playerId?:string;initialCreate?:boolean;onDirtyChange?:(dirty:boolean)=>void}) {
   const [workspace,setWorkspace]=useState<DisciplineWorkspace|null|undefined>(undefined),[failure,setFailure]=useState(''),[retry,setRetry]=useState(0);
   useEffect(()=>{let cancelled=false;setWorkspace(undefined);setFailure('');
     loadDisciplineWorkspace(playerId).then(data=>{if(!cancelled)setWorkspace(data);},error=>{if(!cancelled)setFailure(String(error));});
@@ -15,7 +15,7 @@ export function SuspensionManager({role,onChanged,playerId}:{role:Role;onChanged
   },[playerId,retry]);
   if(failure)return <Card><p role="alert">{failure}</p><button onClick={()=>setRetry(n=>n+1)}>Reintentar sanciones</button></Card>;
   if(workspace===undefined)return <Card><p role="status">Verificando gestión de sanciones…</p></Card>;
-  if(workspace)return <DisciplineManager role={role} initial={workspace} playerId={playerId} onChanged={onChanged}/>;
+  if(workspace)return <DisciplineManager role={role} initial={workspace} playerId={playerId} onChanged={onChanged} initialCreate={initialCreate} onDirtyChange={onDirtyChange}/>;
   return <LegacySuspensionManager role={role} onChanged={onChanged} playerId={playerId}/>;
 }
 

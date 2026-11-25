@@ -10,8 +10,8 @@ import type { Attendance, Evaluation, Player, Role } from '../types';
 import type { AppSession, PlayerCardTotal, Tab } from '../utils/appTypes';
 import { buildSessionLabel } from '../utils/formatters';
 import { getCardWarnings } from '../utils/stats';
-import { Card, Modal } from '../components/ui';
-import { SuspensionManager } from '../components/SuspensionManager';
+import { Card } from '../components/ui';
+import { DisciplineModal } from '../components/DisciplineModal';
 import {loadDisciplineWorkspace,type DisciplineBalance,type DisciplineWorkspace} from '../lib/discipline';
 import {isPendingSanction,sanctionRemaining} from '../utils/discipline';
 import { SessionWorkflow } from '../components/shell/SessionWorkflow';
@@ -177,9 +177,7 @@ export function HomePage({
           }))}/>
         </Card>
       )}
-      {sanctionPlayer&&(role==='admin'||role==='coach'&&disciplineWorkspace)&&<Modal title={`Sanciones de ${sanctionPlayer.name}`} onClose={()=>setSanctionPlayer(null)}>
-        <SuspensionManager role={role} playerId={sanctionPlayer.id} onChanged={loadSuspensions}/>
-      </Modal>}
+      {sanctionPlayer&&(role==='admin'||role==='coach'&&disciplineWorkspace)&&<DisciplineModal title={`Sanciones de ${sanctionPlayer.name}`} onClose={()=>setSanctionPlayer(null)} role={role} playerId={sanctionPlayer.id} onChanged={loadSuspensions}/>}
 
       <Card>
         <div className="row">

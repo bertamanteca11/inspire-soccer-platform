@@ -6,7 +6,7 @@ export type DisciplineBalance={player_id:string;display_name:string;cycle_yellow
   second_yellow_dismissals:number;direct_reds:number;yellow_red_dismissals:number;needs_cycle_review:boolean;undecided_yellow_events:number};
 export type DisciplineCase={id:string;player_id:string;display_name:string;source:string;status:string;matches_total:number|null;matches_served:number;matches_remaining:number|null;
   verified_matches_served:number;needs_review:boolean;revision:number;reason:string|null;decision_notes:string|null;decision_date:string|null;applicable_from:string|null;
-  origin_match_name:string|null;origin_match_date:string|null;created_from_session_id:string|null;linked_card_id:string|null;accumulation_threshold:number|null};
+  origin_match_name:string|null;origin_match_date:string|null;created_from_session_id:string|null;linked_card_id:string|null;accumulation_threshold:number|null;request_key?:string|null};
 export type DisciplineRules={revision:number;competition_name:string;season_start:string;yellow_threshold:number;double_yellow_units:number|null;yellow_red_units:number|null};
 export type DisciplineService={id:string;suspension_id:string;player_id:string;session_id:string;session_name:string;session_date:string;notes:string;revoked_at:string|null};
 export type DisciplineWorkspace={version:2;rules:DisciplineRules;balances:DisciplineBalance[];cases:DisciplineCase[];service_matches:DisciplineService[];matches:ServiceCandidate[]};

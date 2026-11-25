@@ -187,6 +187,15 @@ test('disciplinary cases use explicit match service, independent cards and prese
       const data=await workspace(pid);assert.equal(data.cases.length,1);assert.equal(data.cases[0].status,'cancelled');
       assert.equal(data.balances[0].historical_yellows,4);
     });
+    await t.test('targeted sanction incident diagnostic is read-only and includes saved decisions and exact league-match dates',async()=>{
+      await privileged();
+      const counts=()=>db.query('SELECT (SELECT count(*) FROM cards) AS cards,(SELECT count(*) FROM suspensions) AS cases,(SELECT count(*) FROM discipline_service_matches) AS service,(SELECT count(*) FROM discipline_audit) AS audit');
+      const before=(await counts()).rows;
+      const result=await db.exec(read('diagnostics/izan_victor_sanctions_read_only.sql'));
+      const review=result.at(-1).rows[0].izan_victor_sanctions_review;
+      assert.ok(Array.isArray(review.cases));assert.ok(Array.isArray(review.matches));assert.ok(Array.isArray(review.recent_saved_changes));
+      assert.deepEqual((await counts()).rows,before);
+    });
     await t.test('public writes and old automatic-completion paths cannot bypass reviewed service or authorized roles',async()=>{
       for(const who of [null,viewer]){
         await auth(who);await assert.rejects(workspace(legacy),/permission|Staff only/);await assert.rejects(action('save_case',{player_id:legacy}),/permission|Staff only/);

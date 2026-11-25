@@ -14,6 +14,7 @@ node_modules/
 /.veo-test-artifacts/
 /.phase4-test-artifacts/
 supabase/staff/*.local.sql
+supabase/discipline/*.local.sql
 
 # Generated metadata and test reports
 .DS_Store

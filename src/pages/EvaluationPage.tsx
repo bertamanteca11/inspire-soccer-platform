@@ -1,7 +1,7 @@
 import { workflowAction, WorkflowActionError, type WorkflowDiagnostic } from '../lib/workflows';
 import { saveDisciplinaryCard,loadDisciplineWorkspace,type DisciplineWorkspace } from '../lib/discipline';
 import {cardKind,isDismissal,isPendingSanction} from '../utils/discipline';
-import {SuspensionManager} from '../components/SuspensionManager';
+import {DisciplineModal} from '../components/DisciplineModal';
 import { useWorkflowAccess } from '../utils/useWorkflowAccess';
 import { sortPlayersByJersey } from '../utils/playerOrder';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,7 +17,7 @@ import { eligibilityReason, distinctRows, isSportingActivity, newEvaluationDraft
 import { readPerformancePages } from '../lib/performance';
 import { evaluationSnapshot } from '../utils/evaluationSnapshot';
 import { evaluationEditorRow, reviewedEvaluationRows, usesEvaluationDefaults } from '../utils/evaluationDefaults';
-import { Card, Modal } from '../components/ui';
+import { Card } from '../components/ui';
 import { SessionHeading } from '../components/SessionHeading';
 
 const matchRatingFields = [
@@ -740,7 +740,7 @@ export function EvaluationPage({
         </Card>
       )}
 
-      {sanctionPlayer&&<Modal title={`Sanciones de ${sanctionPlayer.display_name}`} onClose={()=>setSanctionPlayer(null)}><SuspensionManager role={role} playerId={sanctionPlayer.id} onChanged={async()=>{await loadCards();}}/></Modal>}
+      {sanctionPlayer&&<DisciplineModal title={`Sanciones de ${sanctionPlayer.display_name}`} onClose={()=>setSanctionPlayer(null)} role={role} playerId={sanctionPlayer.id} onChanged={async()=>{await loadCards();}}/>}
       <Card key={'comment-'+player.id}>
         <strong>Comentario de {player.display_name}</strong>
         <textarea disabled={locked || confirming || editing || savingCard || recordSaving} value={comments[player.id] ?? ''} onChange={e => {setComments(prev => ({...prev,[player.id]:e.target.value})); setDirtyComments(prev => ({...prev,[player.id]:true})); setSavedNotice('');}} aria-label={"Comentario de " + player.display_name} placeholder="Comentario individual..." />

@@ -17,7 +17,7 @@
     "test:final-ui": "playwright test -c tests/final.playwright.config.cjs",
     "test:staff": "node --test tests/private-staff-database.test.cjs",
     "test:typecheck": "tsc --noEmit --incremental false",
-    "test:discipline": "node --test tests/discipline-v2-database.test.cjs tests/discipline-display.test.cjs",
+    "test:discipline": "node --test tests/discipline-v2-database.test.cjs tests/discipline-display.test.cjs tests/reviewed-sanctions-database.test.cjs",
     "test:discipline-ui": "playwright test -c tests/discipline.playwright.config.cjs"
   },
   "dependencies": {

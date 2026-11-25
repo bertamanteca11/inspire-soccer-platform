@@ -1,4 +1,4 @@
-import {useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
 import type {Role} from '../types';
 import {disciplineAction,loadDisciplineWorkspace,type DisciplineBalance,type DisciplineCase,type DisciplineRules,type DisciplineWorkspace} from '../lib/discipline';
 import {hasEmptyLegacyService,isPendingSanction,sanctionRemaining,sanctionStatus,serviceCandidates} from '../utils/discipline';
@@ -17,13 +17,21 @@ export function DisciplineBalanceSummary({balance}:{balance:DisciplineBalance}) 
 }
 
 type Mutation=(action:string,payload:Record<string,unknown>,revision?:number)=>Promise<DisciplineWorkspace|null>;
-export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;initial:DisciplineWorkspace;playerId?:string;onChanged?:()=>void|Promise<void>}) {
+export function DisciplineManager({role,initial,playerId,onChanged,initialCreate=false,onDirtyChange}:{role:Role;initial:DisciplineWorkspace;playerId?:string;onChanged?:()=>void|Promise<void>;initialCreate?:boolean;onDirtyChange?:(dirty:boolean)=>void}) {
   const [data,setData]=useState(initial),[selected,setSelected]=useState<string|null>(()=>{
     const pending=initial.cases.filter(isPendingSanction);
-    return playerId&&pending.length===1?pending[0].id:null;
-  }),[creating,setCreating]=useState(false);
+    return !initialCreate&&playerId&&pending.length===1?pending[0].id:null;
+  }),[creating,setCreating]=useState(initialCreate);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const pending=useRef(false),canManage=role==='admin'||role==='coach';
+  const [editorGeneration,setEditorGeneration]=useState(0);
+  const draftDirty=useRef(false);
+  const reportDirty=useCallback((dirty:boolean)=>{draftDirty.current=dirty;onDirtyChange?.(dirty);},[onDirtyChange]);
+  function canDiscard(){
+    if(!draftDirty.current)return true;
+    if(!window.confirm('Hay cambios sin guardar. ¿Descartarlos y continuar?'))return false;
+    setEditorGeneration(n=>n+1);return true;
+  }
   const mutate:Mutation=async(action,payload,revision)=>{
     if(!canManage||pending.current)return null;
     pending.current=true;setBusy(true);setError('');setNotice('');
@@ -31,18 +39,24 @@ export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;i
       const result=await disciplineAction(action,payload,revision);
       let next=result;
       if(!playerId){try{next=await loadDisciplineWorkspace()||result;}catch{setError('Cambio guardado; no se pudo recargar la lista completa. Actualiza las sanciones.');}}
-      setData(next);setNotice(action==='serve_match'?'Partido cumplido guardado.':action==='revoke_match'?'Cumplimiento corregido.':'Sanción guardada.');
+      const savedCase=next.cases.find(s=>s.id===payload.id)||(payload.request_key?next.cases.find(s=>s.request_key===payload.request_key):undefined);
+      let message=action==='serve_match'?'Partido cumplido guardado.':action==='revoke_match'?'Cumplimiento corregido.':'Sanción guardada.';
+      if(action==='save_case'&&savedCase){
+        const duration=savedCase.matches_total===null?'Duración pendiente.':`${savedCase.matches_total} partidos de sanción.`;
+        const service=savedCase.needs_review?'Cumplimiento anterior pendiente de revisar.':`${savedCase.verified_matches_served} partidos cumplidos registrados.`;
+        message=`Sanción guardada. ${duration} ${service}`;
+      }
+      setData(next);setNotice(message);
       try{await onChanged?.();}catch{setError('Cambio guardado; recarga para actualizar los demás avisos.');}
       if(action==='save_case'){
-        const saved=next.cases.find(s=>s.id===payload.id)||next.cases.find(s=>(s as any).request_key===payload.request_key);
-        setCreating(false);setSelected(saved?.id||null);
+        setCreating(false);setSelected(savedCase?.id||null);
       }
       return next;
     }catch(failure){setError(failure instanceof Error?failure.message:String(failure));return null;}
     finally{pending.current=false;setBusy(false);}
   };
   async function refresh(){
-    if(pending.current)return;setBusy(true);setError('');
+    if(pending.current||!canDiscard())return;setBusy(true);setError('');
     try{const next=await loadDisciplineWorkspace(playerId);if(!next)throw new Error('La gestión de sanciones no está disponible.');setData(next);}
     catch(failure){setError(String(failure));}finally{setBusy(false);}
   }
@@ -58,25 +72,25 @@ export function DisciplineManager({role,initial,playerId,onChanged}:{role:Role;i
       <strong>{s.display_name} · {s.source==='yellow_accumulation'?'Acumulación de amarillas':s.source==='manual'?'Otra sanción':translateCard(s.source)}</strong>
       <span>{sanctionRemaining(s)}</span>
       {s.origin_match_name&&<small>{s.origin_match_name}{s.origin_match_date?' · '+formatDate(s.origin_match_date):''}</small>}
-      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);setError('');}}>Ver / editar sanción</button>}
+      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{if(!canDiscard())return;setCreating(false);setSelected(s.id);setError('');}}>Ver / editar sanción</button>}
     </div>)}
-    {(creating||selectedCase)&&<CaseEditor key={creating?'new':`${selectedCase!.id}:${selectedCase!.revision}`} row={creating?undefined:selectedCase} data={data} playerId={playerId} busy={busy} mutate={mutate} onClose={()=>{setSelected(null);setCreating(false);}}/>}
+    {(creating||selectedCase)&&<CaseEditor key={`${creating?'new':`${selectedCase!.id}:${selectedCase!.revision}`}:${editorGeneration}`} row={creating?undefined:selectedCase} data={data} playerId={playerId} busy={busy} mutate={mutate} onDirtyChange={reportDirty} onClose={()=>{if(!canDiscard())return;setSelected(null);setCreating(false);}}/>}
     {!!history.length&&<details><summary>Sanciones anteriores ({history.length})</summary>
       {history.map(s=><div key={s.id} className="stack suspension-management-row"><strong>{s.display_name} · {sanctionStatus[s.status]}</strong><span>{s.reason}</span>
         {s.needs_review&&<small>Registro antiguo pendiente de revisar</small>}
-        {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setCreating(false);setSelected(s.id);}}>{s.needs_review?'Revisar registro anterior':'Ver detalle'}</button>}
+        {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{if(!canDiscard())return;setCreating(false);setSelected(s.id);}}>{s.needs_review?'Revisar registro anterior':'Ver detalle'}</button>}
       </div>)}
     </details>}
     <details><summary>Más opciones</summary>
       <button type="button" className="secondary" disabled={busy} onClick={()=>void refresh()}>Actualizar sanciones</button>
-      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{setSelected(null);setCreating(true);setError('');}}>Añadir otra sanción</button>}
+      {canManage&&<button type="button" className="secondary" disabled={busy} onClick={()=>{if(!canDiscard())return;setSelected(null);setCreating(true);setError('');}}>Añadir otra sanción</button>}
       {!playerId&&<details><summary>Cuenta de amarillas</summary>{data.balances.map(b=><div key={b.player_id}><strong>{b.display_name}</strong><DisciplineBalanceSummary balance={b}/></div>)}</details>}
       {role==='admin'&&<details><summary>Reglas de la liga</summary><RulesEditor key={data.rules.revision} rules={data.rules} busy={busy} mutate={mutate}/></details>}
     </details>
   </Card>;
 }
 
-function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase;data:DisciplineWorkspace;playerId?:string;busy:boolean;mutate:Mutation;onClose:()=>void}) {
+function CaseEditor({row,data,playerId,busy,mutate,onClose,onDirtyChange}:{row?:DisciplineCase;data:DisciplineWorkspace;playerId?:string;busy:boolean;mutate:Mutation;onClose:()=>void;onDirtyChange:(dirty:boolean)=>void}) {
   const [player,setPlayer]=useState(playerId||row?.player_id||''),[matches,setMatches]=useState(row?.matches_total==null?'':String(row.matches_total));
   const [from,setFrom]=useState(row?.applicable_from||''),[decision,setDecision]=useState(row?.decision_date||'');
   const [notes,setNotes]=useState(row?.decision_notes||''),[review,setReview]=useState(false),[cancelled,setCancelled]=useState(row?.status==='cancelled');
@@ -93,6 +107,15 @@ function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase
   const decisionChanged=!!row&&(matches!==(row.matches_total==null?'':String(row.matches_total))||cancelled!==(row.status==='cancelled'));
   const reviewRequired=manualReview&&(decisionChanged||review);
   const reviewMissing=reviewRequired&&(!review||!notes.trim());
+  const decisionDirty=row?dirty:!!(matches||from||notes||origin||decision);
+  const unsaved=decisionDirty||!!(matchId||serviceNotes||verified);
+  useEffect(()=>{onDirtyChange(unsaved);return()=>onDirtyChange(false);},[unsaved,onDirtyChange]);
+  useEffect(()=>{
+    if(!unsaved)return;
+    const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};
+    window.addEventListener('beforeunload',warn);
+    return()=>window.removeEventListener('beforeunload',warn);
+  },[unsaved]);
   async function save(event:React.FormEvent){
     event.preventDefault();
     if(reviewMissing){setValidation(!review?'Confirma los partidos cumplidos antes de cambiar esta sanción anterior.':'Añade el motivo de la revisión para guardar.');return;}
@@ -107,6 +130,8 @@ function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase
     {!playerId&&<div className="row"><h4>{row?'Duración de la sanción':'Nueva sanción'}</h4><button type="button" className="chip" disabled={busy} onClick={onClose}>Cerrar edición</button></div>}
     {row&&<p className="muted">{row.source==='yellow_accumulation'?'Acumulación de amarillas':row.source==='manual'?'Otra sanción':translateCard(row.source)}{row.origin_match_name?` · ${row.origin_match_name}${row.origin_match_date?' · '+formatDate(row.origin_match_date):''}`:''}</p>}
     {validation&&<p role="alert">{validation}</p>}
+    {initialiseEmpty&&<p className="muted">Datos anteriores sin revisar. Comprueba la duración y guarda la sanción; después registra cada partido cumplido.</p>}
+    {decisionDirty&&<p role="status" className="save-feedback">Cambios sin guardar. Pulsa «Guardar sanción» para conservarlos al cerrar.</p>}
     {row&&<div className="stack discipline-case-service">
       <p className="discipline-service-progress">{row.status==='cancelled'?'Sanción cancelada':initialiseEmpty?'Partidos cumplidos: 0':row.needs_review?'Cumplimiento anterior pendiente de revisar':row.matches_total===null?`${row.verified_matches_served} partidos cumplidos · Duración pendiente`:`Cumplidos: ${row.verified_matches_served} / ${row.matches_total} · Quedan ${Math.max(0,row.matches_total-row.verified_matches_served)}`}</p>
       {row.status==='served'&&!row.needs_review&&<strong>Sanción cumplida</strong>}
@@ -126,11 +151,13 @@ function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase
       </details>}
     </div>}
     <form className="stack" onSubmit={save}>
+      {!row&&<><h4>Sanción anterior o de otro equipo</h4><p>No necesitas crear una evaluación ni una tarjeta antigua. Indica la resolución y registra solo los partidos de liga que haya cumplido por esta sanción.</p></>}
       {!row&&!playerId&&<label>Jugador<select required value={player} disabled={busy} onChange={e=>setPlayer(e.target.value)}><option value="">Seleccionar jugador</option>{data.balances.map(b=><option key={b.player_id} value={b.player_id}>{b.display_name}</option>)}</select></label>}
       <label>Partidos de sanción<input type="number" min="1" max="99" value={matches} disabled={busy} placeholder="Pendiente de confirmar" onChange={e=>setMatches(e.target.value)}/></label>
       {!matches&&<small>Déjalo vacío si aún no sabes cuántos partidos son.</small>}
-      <label>Fecha del primer partido de sanción<input ref={fromInput} type="date" value={from} disabled={busy} onChange={e=>setFrom(e.target.value)}/></label>
+      <label>Fecha del primer partido de sanción<input ref={fromInput} type="date" required={!row} value={from} disabled={busy} onChange={e=>setFrom(e.target.value)}/></label>
       <small>El primer partido que cuenta para cumplirla, aunque la duración se comunique después. No es la fecha de la tarjeta.</small>
+      {!row&&<label>Motivo y referencia de la sanción<textarea required value={notes} maxLength={4000} disabled={busy} placeholder="Ej.: roja directa de la temporada anterior, 2 partidos según resolución." onChange={e=>setNotes(e.target.value)}/></label>}
       {manualReview&&row&&<div className="stack discipline-legacy-review">
         <p>Registro antiguo: {row.matches_served} partidos marcados como cumplidos, {row.verified_matches_served} con partido identificado.</p>
         {decisionChanged&&!review&&<p>Para cambiar la duración, confirma abajo qué partidos se han cumplido.</p>}
@@ -138,13 +165,14 @@ function CaseEditor({row,data,playerId,busy,mutate,onClose}:{row?:DisciplineCase
         {review&&<label>Motivo de la revisión<textarea required value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)}/></label>}
       </div>}
       <details><summary>Notas y otras opciones</summary><div className="stack">
-        {!review&&<label>Notas<textarea value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)}/></label>}
+        {!!row&&!review&&<label>Notas<textarea value={notes} maxLength={4000} disabled={busy} onChange={e=>setNotes(e.target.value)}/></label>}
         <label>Fecha de la resolución<input type="date" value={decision} disabled={busy} onChange={e=>setDecision(e.target.value)}/></label>
         {(!row||!row.created_from_session_id)&&<label>Partido de origen (si se conoce)<select value={origin} disabled={busy} onChange={e=>setOrigin(e.target.value)}><option value="">Origen no identificado</option>{data.matches.map(m=><option key={m.id} value={m.id}>{m.name} · {formatDate(m.session_date)}</option>)}</select></label>}
         {row&&<label className="discipline-check"><input type="checkbox" checked={cancelled} disabled={busy} onChange={e=>setCancelled(e.target.checked)}/>Cancelar esta sanción</label>}
       </div></details>
       {reviewRequired&&review&&!notes.trim()&&<small>Añade el motivo de la revisión para poder guardar.</small>}
       <button type="submit" className="primary" disabled={busy||reviewMissing}>{busy?'Guardando…':review?'Guardar revisión':'Guardar sanción'}</button>
+      {row&&isPendingSanction(row)&&<small>Guardar la duración no descuenta partidos. Usa «Registrar partido cumplido» para indicar cada encuentro que no jugó por esta sanción.</small>}
     </form>
   </section>;
 }
