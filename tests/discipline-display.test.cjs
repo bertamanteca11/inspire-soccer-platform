@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),ts=require('typescript');
 require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,f);
-const {cardYellows,isDismissal,serviceCandidates,sanctionRemaining}=require('../src/utils/discipline.ts');
+const {cardYellows,hasEmptyLegacyService,isDismissal,serviceCandidates,sanctionRemaining}=require('../src/utils/discipline.ts');
 const {summaryCardTotals}=require('../src/utils/summaryScope.ts');
 const {buildPlayerReport}=require('../src/utils/playerReport.ts');
 
@@ -15,6 +15,15 @@ test('combined, second-yellow and withdrawn incidents have consistent physical h
   assert.equal(totals.yellow_cards,4);assert.equal(totals.red_cards,3);
   assert.equal(sanctionRemaining({matches_total:null,matches_served:0}),'Pendiente de resolución');
   assert.equal(sanctionRemaining({matches_total:2,matches_served:1}),'1 partido pendiente');
+});
+
+test('only an unserved legacy dismissal with no ledger history can initialise service when its decision is saved',()=>{
+  const row={id:'case',source:'straight_red',status:'active',needs_review:true,matches_served:0,verified_matches_served:0};
+  assert.equal(hasEmptyLegacyService(row,[]),true);
+  for(const patch of [{status:'served'},{status:'cancelled'},{source:'yellow_accumulation'},{matches_served:1},{verified_matches_served:1},{needs_review:false}])
+    assert.equal(hasEmptyLegacyService({...row,...patch},[]),false);
+  assert.equal(hasEmptyLegacyService(row,[{suspension_id:'case',revoked_at:'2026-11-01'}]),false);
+  assert.equal(hasEmptyLegacyService(row,[{suspension_id:'another-case'}]),true);
 });
 
 test('service selection excludes earlier games, trainings and matches already used by any case for that player',()=>{

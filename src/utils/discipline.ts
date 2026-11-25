@@ -6,6 +6,14 @@ export function cardYellows(card:CardLike):number {
 }
 export function isDismissal(card:CardLike):boolean { return !card.voided_at&&['double_yellow','straight_red','yellow_red'].includes(cardKind(card)); }
 export function isPendingSanction(row:{status:string}):boolean { return ['awaiting_decision','active','partially_served'].includes(row.status); }
+// Saving a new decision can initialise a legacy dismissal with no service history.
+// Completed/cancelled cases, accumulation cycles and any ledger history still need
+// an explicit review; never discard or infer a previously served match.
+export function hasEmptyLegacyService(row:{id:string;source:string;status:string;needs_review:boolean;matches_served:number;verified_matches_served:number},services:{suspension_id:string}[]):boolean {
+  return row.needs_review&&['active','awaiting_decision'].includes(row.status)
+    &&['straight_red','double_yellow','yellow_red','manual'].includes(row.source)
+    &&row.matches_served===0&&row.verified_matches_served===0&&!services.some(s=>s.suspension_id===row.id);
+}
 export function sanctionRemaining(row:{matches_total:number|null;matches_served:number;needs_review?:boolean}):string {
   if(row.needs_review)return 'Cumplimiento anterior pendiente de revisar';
   if(row.matches_total===null)return 'Pendiente de resolución';

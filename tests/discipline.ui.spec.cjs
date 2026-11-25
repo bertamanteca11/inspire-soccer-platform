@@ -51,7 +51,7 @@ test('Coach enters the official decision later through the Sanction button and v
   await expect(dialog.getByLabel('Partidos de sanción',{exact:true})).toHaveValue('');
   const editor=dialog.getByRole('region',{name:'Editar sanción'});
   await editor.getByLabel('Partidos de sanción',{exact:true}).fill('2');
-  await editor.getByLabel('Aplicable desde',{exact:true}).fill(await s.day(-9));
+  await editor.getByLabel('Fecha del primer partido de sanción',{exact:true}).fill(await s.day(-9));
   await expect(editor.getByLabel('Fecha de la resolución',{exact:true})).toBeHidden();
   await expect(editor.getByRole('combobox',{name:'Partido cumplido',exact:true})).toBeHidden();
   await editor.getByRole('button',{name:'Guardar sanción',exact:true}).click();
@@ -119,8 +119,12 @@ test('a legacy red marked served without evidence is explicitly reviewed without
   const dialog=page.getByRole('dialog');await dialog.getByText('Sanciones anteriores (1)',{exact:true}).click();
   await dialog.getByRole('button',{name:'Revisar registro anterior',exact:true}).click();
   await dialog.getByLabel('Partidos de sanción',{exact:true}).fill('');
-  await dialog.getByLabel('Aplicable desde',{exact:true}).fill(await s.day(-9));
+  await dialog.getByLabel('Fecha del primer partido de sanción',{exact:true}).fill(await s.day(-9));
+  const beforeReview=s.writes.length;
+  await expect(dialog.getByRole('button',{name:'Guardar sanción',exact:true})).toBeDisabled();
+  expect(s.writes.length).toBe(beforeReview);
   await dialog.getByLabel(/He revisado los partidos cumplidos/).check();
+  await expect(dialog.getByRole('button',{name:'Guardar revisión',exact:true})).toBeDisabled();
   await dialog.getByLabel('Motivo de la revisión',{exact:true}).fill('Se marcó cumplida sin un partido posterior; pendiente de resolución oficial');page.once('dialog',d=>d.accept());
   await dialog.getByRole('button',{name:'Guardar revisión',exact:true}).click();
   await expect(dialog.getByText('0 partidos cumplidos · Duración pendiente',{exact:true})).toBeVisible();
@@ -156,4 +160,67 @@ for(const role of ['coach','admin'])test(`${role}: yellow history and old comple
   await expect(dialog.getByText('Sanción cancelada',{exact:true})).toBeVisible();
   await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
   await expect(page.getByRole('button',{name:/^Gestionar sanciones de /})).toHaveCount(0);
+});
+
+for(const role of ['coach','admin'])test(`${role}: an old unserved dismissal saves a three-match decision and explicitly serves two later games without a historical-review dead end`,async({page},info)=>{
+  await page.setViewportSize({width:360,height:844});const s=await setup(page,role);await saveIncident(page,'straight_red');
+  await s.db.exec('RESET ROLE;');
+  await s.db.query("UPDATE suspensions SET needs_review=true,matches_total=1,status='active',applicable_from=(SELECT session_date FROM sessions WHERE id=$2) WHERE player_id=$1",[s.player,s.id(41)]);await s.auth();
+  const original=(await s.db.query('SELECT id FROM suspensions WHERE player_id=$1',[s.player])).rows[0].id;
+  await page.getByRole('button',{name:'Inicio',exact:true}).first().click();
+  await page.getByRole('button',{name:'Gestionar sanciones de Alex',exact:true}).click();
+  const dialog=page.getByRole('dialog'),editor=dialog.getByRole('region',{name:'Editar sanción'});
+  await expect(editor.getByText('Registrar partido cumplido',{exact:true})).toBeVisible();
+  const actionBox=await editor.getByText('Registrar partido cumplido',{exact:true}).boundingBox();expect(actionBox.y).toBeLessThan(600);
+  await expect(editor.getByLabel(/He revisado los partidos cumplidos/)).toHaveCount(0);
+  await editor.getByText('Registrar partido cumplido',{exact:true}).click();
+  await expect(editor.getByRole('combobox',{name:'Partido cumplido',exact:true})).toBeDisabled();
+  await expect(editor.getByRole('button',{name:'Guardar partido cumplido',exact:true})).toBeDisabled();
+  await editor.getByText('Registrar partido cumplido',{exact:true}).click();
+  await editor.getByLabel('Partidos de sanción',{exact:true}).fill('3');
+  await editor.getByLabel('Fecha del primer partido de sanción',{exact:true}).fill(await s.day(-7));
+  await expect(editor.getByRole('button',{name:'Guardar sanción',exact:true})).toBeEnabled();
+  await editor.getByRole('button',{name:'Guardar sanción',exact:true}).click();
+  await expect(editor.getByText('Cumplidos: 0 / 3 · Quedan 3',{exact:true})).toBeVisible();
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  const reviewed=(await s.db.query('SELECT id,matches_total,matches_served,needs_review,status FROM suspensions WHERE player_id=$1',[s.player])).rows;
+  expect(reviewed).toEqual([{id:original,matches_total:3,matches_served:0,needs_review:false,status:'active'}]);
+  for(const [index,sid]of [s.id(41),s.id(42)].entries()){
+    await editor.getByText('Registrar partido cumplido',{exact:true}).click();
+    await editor.getByRole('combobox',{name:'Partido cumplido',exact:true}).selectOption(sid);
+    await editor.getByLabel('Confirmo que no jugó por esta sanción.',{exact:true}).check();
+    await editor.getByLabel('Comentario del cumplimiento',{exact:true}).fill('Partido de liga cumplido de esta sanción');
+    await editor.getByRole('button',{name:'Guardar partido cumplido',exact:true}).click();
+    await expect(editor.getByText(`Cumplidos: ${index+1} / 3 · Quedan ${2-index}`,{exact:true})).toBeVisible();
+  }
+  expect((await s.db.query('SELECT matches_total,matches_served,status FROM suspensions WHERE id=$1',[original])).rows[0]).toEqual({matches_total:3,matches_served:2,status:'partially_served'});
+  expect((await s.db.query('SELECT count(*) AS n FROM cards WHERE player_id=$1',[s.player])).rows[0].n).toBe(1);
+  expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+  await page.screenshot({path:info.outputPath('legacy-three-matches-two-served.png'),fullPage:true});
+});
+
+test('matches served before the official length is announced remain linked to the same case when three matches are confirmed later',async({page})=>{
+  const s=await setup(page);await saveIncident(page,'straight_red');
+  await page.getByRole('button',{name:'Inicio',exact:true}).first().click();
+  await page.getByRole('button',{name:'Gestionar sanciones de Alex',exact:true}).click();
+  const editor=page.getByRole('region',{name:'Editar sanción'});
+  await editor.getByLabel('Fecha del primer partido de sanción',{exact:true}).fill(await s.day(-7));
+  await editor.getByRole('button',{name:'Guardar sanción',exact:true}).click();
+  await expect(editor.getByText('0 partidos cumplidos · Duración pendiente',{exact:true})).toBeVisible();
+  const original=(await s.db.query('SELECT id FROM suspensions WHERE player_id=$1',[s.player])).rows[0].id;
+  for(const [index,sid]of [s.id(41),s.id(42)].entries()){
+    await editor.getByText('Registrar partido cumplido',{exact:true}).click();
+    await editor.getByRole('combobox',{name:'Partido cumplido',exact:true}).selectOption(sid);
+    await editor.getByLabel('Confirmo que no jugó por esta sanción.',{exact:true}).check();
+    await editor.getByLabel('Comentario del cumplimiento',{exact:true}).fill('Cumplimiento confirmado; duración oficial todavía pendiente');
+    await editor.getByRole('button',{name:'Guardar partido cumplido',exact:true}).click();
+    await expect(editor.getByText(`${index+1} partidos cumplidos · Duración pendiente`,{exact:true})).toBeVisible();
+  }
+  const before=(await s.db.query('SELECT matches_total,matches_served,status FROM suspensions WHERE id=$1',[original])).rows[0];
+  expect(before).toEqual({matches_total:null,matches_served:2,status:'awaiting_decision'});
+  await editor.getByLabel('Partidos de sanción',{exact:true}).fill('3');
+  await editor.getByRole('button',{name:'Guardar sanción',exact:true}).click();
+  await expect(editor.getByText('Cumplidos: 2 / 3 · Quedan 1',{exact:true})).toBeVisible();
+  expect((await s.db.query('SELECT id FROM suspensions WHERE player_id=$1',[s.player])).rows).toEqual([{id:original}]);
+  expect((await s.db.query('SELECT count(*) AS n FROM discipline_service_matches WHERE suspension_id=$1 AND revoked_at IS NULL',[original])).rows[0].n).toBe(2);
 });

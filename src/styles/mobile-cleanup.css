@@ -24,7 +24,10 @@
 .discipline-case-editor h4 { margin:8px 0; }
 .discipline-manager .discipline-check { display:flex; align-items:flex-start; gap:10px; line-height:1.5; }
 .discipline-manager .discipline-check input { width:22px; min-width:22px; height:22px; margin:0; padding:0; flex-shrink:0; }
-.discipline-case-service,.discipline-rules { margin-top:18px; }
+.discipline-case-service { margin:0 0 16px; }
+.discipline-rules { margin-top:18px; }
+.discipline-register-service>summary { padding:12px; min-height:48px; border:1px solid var(--line); border-radius:12px; background:var(--card,#fff); color:var(--ink); }
+.discipline-register-service[open]>div { padding-top:12px; }
 .discipline-service-row { border-bottom:1px solid var(--line); padding:10px 0; overflow-wrap:anywhere; }
 .evaluation-criteria { padding-left: 20px; }
 .evaluation-criteria li { margin: 8px 0; }
